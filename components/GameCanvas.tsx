@@ -391,11 +391,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const baseColor = isCargoDeath ? '#d97706' : (persona === Persona.EVIL ? '#ef4444' : '#f472b6');
 
         if (!isCargoDeath) {
+            droneRef.current.health = 0; // Ensure health is 0 to stop other triggers
             // Sever connection on drone death
             cargoRef.current.connected = false;
             // Give cargo initial velocity based on drone's velocity at death
             cargoRef.current.vel.x = droneRef.current.vel.x * 0.8;
             cargoRef.current.vel.y = droneRef.current.vel.y * 0.8;
+        } else {
+            cargoRef.current.health = 0; // Ensure cargo health is 0
         }
 
         for (let i = 0; i < debrisCount; i++) {
@@ -779,7 +782,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
                     train.x += train.speed * (dt * 0.6);
 
-                    if (train.x > drone.pos.x - 50 && !drone.isGodMode && drone.health > 0) {
+                    if (train.x > drone.pos.x - 50 && !drone.isGodMode && drone.health > 0 && !deathSequenceRef.current) {
                         setFaceStatus('dead');
                         setVedalMessage("HYPE OVERLOAD! TOO SLOW!||發燒列車爆炸！太慢了！");
                         lastDamageSource.current = 'TRAIN';
