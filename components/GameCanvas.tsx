@@ -47,7 +47,7 @@ interface GameCanvasProps {
     addMoney: (amount: number) => void;
     setFaceStatus: (s: 'idle' | 'panic' | 'dead' | 'win' | 'fast') => void;
     setVedalMessage: (msg: string) => void;
-    setStats: (hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number) => void;
+    setStats: (hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number, trainX?: number) => void;
     lastCheckpoint: Vector2;
     setLastCheckpoint: (pos: Vector2) => void;
     respawnToken?: number;
@@ -175,7 +175,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const deathSequenceRef = useRef<{ step: 'dying' | 'dead'; reason: string; distance: number; trajectory: { x: number, y: number }[]; cargoTrajectory: { x: number, y: number }[]; trainX?: number; startTime: number; pos: { x: number, y: number } } | null>(null);
 
     const mpSyncTimerRef = useRef(0);
+    const trainGraceTimerRef = useRef(0);
     const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
+    const checkpointDestroyedRef = useRef(false);
 
     // Expose refs
     // Expose refs
@@ -368,8 +370,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Reset Death Debris
         debrisRef.current = [];
         deathSequenceRef.current = null;
+        // [MULTIPLAYER FIX] Force debris clear again to be safe
+        debrisRef.current = [];
+
+        // [MULTIPLAYER FIX] Remove grace period so train kills immediately
+        trainGraceTimerRef.current = 0;
+
+        // [FIX] Reset destruction state so future checkpoints can trigger effects
+        checkpointDestroyedRef.current = false;
 
     }, [upgrades, lastCheckpoint, setUrgentOrderProgress]);
+
+    // [FIX] Reset destruction flag when reaching a new checkpoint
+    useEffect(() => {
+        checkpointDestroyedRef.current = false;
+    }, [lastCheckpoint]);
 
     const triggerDeathSequence = useCallback((pos: { x: number, y: number }, reason: string, distance: number, trajectory: { x: number, y: number }[], cargoTrajectory: { x: number, y: number }[], trainX?: number) => {
         deathSequenceRef.current = {
@@ -428,6 +443,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const initWorld = useCallback(() => {
         // Reset Data
+        // [MULTIPLAYER FIX] Preserve train if in multiplayer
+        let savedTrain = null;
+        if (multiplayer?.isActive && levelRef.current?.train) {
+            savedTrain = { ...levelRef.current.train };
+        }
+
+        // Reset Data
         levelRef.current = {
             walls: [],
             obstacles: [],
@@ -436,16 +458,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             tutels: [],
             gasZones: [],
             urgentOrders: [],
-            train: { x: lastCheckpoint.x - 800, y: lastCheckpoint.y, speed: 3.5, w: 120, h: 40 }
+            train: savedTrain || { x: lastCheckpoint.x - 800, y: lastCheckpoint.y, speed: 3.5, w: 120, h: 40 }
         };
         lastBiomeRef.current = -1; // Reset biome tracking
         rngRef.current = MathUtils.createRng(MathUtils.stringToSeed(seed)); // Reset RNG for deterministic world start
+        checkpointDestroyedRef.current = false;
 
         const startWallX = lastCheckpoint.x - 400;
 
-        // Create a safe "Runway" tube for the start
-        levelRef.current.walls.push({ x: startWallX - 400, y: 900, w: 1200, h: 1000, type: 'wall' }); // Floor
-        levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
+        // Safe "Runway" removed as per user request
+        // levelRef.current.walls.push({ x: startWallX - 400, y: 900, w: 1200, h: 1000, type: 'wall' }); // Floor
+        // levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
 
         // The checkpoint pad
         const cpWallX = lastCheckpoint.x - 200;
@@ -466,7 +489,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     }, [generateChunk, lastCheckpoint, resetDroneState, seed]);
 
-    const respawnLevel = useCallback(() => {
+    const respawnLevel = useCallback((forceTrainReset: boolean = false) => {
         // Like initWorld, but DOES NOT clear levelRef.current.walls
         // It just resets drone, cargo, and train relative pos
         resetDroneState();
@@ -474,11 +497,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         levelRef.current.coins = [];
         levelRef.current.tutels = [];
         levelRef.current.urgentOrders = [];
-        levelRef.current.train.x = lastCheckpoint.x - 800;
-        levelRef.current.train.y = lastCheckpoint.y;
-        levelRef.current.train.speed = 3.5;
+
+        // CRITICAL: In multiplayer, NEVER reset train unless explicitly forced (GLOBAL_RESTART)
+        // Check multiplayer.isActive directly to ensure stability
+        const isMultiplayer = multiplayer?.isActive === true;
+
+        if (!isMultiplayer || forceTrainReset) {
+            levelRef.current.train.x = lastCheckpoint.x - 800;
+            levelRef.current.train.y = lastCheckpoint.y;
+            levelRef.current.train.speed = 3.5;
+        }
+
+        // [VISUAL FIX] Clear debris and effects on respawn (since we don't remount in MP)
+        debrisRef.current = [];
+        particlesRef.current = [];
+        damageTextsRef.current = [];
+        shakeRef.current = 0;
+        hitStopRef.current = 0;
+        damageFlashRef.current = 0;
+
         setFaceStatus('idle');
-    }, [resetDroneState, lastCheckpoint, setFaceStatus]);
+    }, [resetDroneState, lastCheckpoint, setFaceStatus, multiplayer?.isActive]);
 
     // --- MULTIPLAYER LOGIC (TRAIN SYNC & EVENTS) ---
     useEffect(() => {
@@ -490,9 +529,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Sync Train
                     if (event.data.train) {
                         const t = levelRef.current.train;
-                        // Client-side smoothing
-                        t.x = t.x + (event.data.train.x - t.x) * 0.5;
-                        t.speed = event.data.train.speed;
+                        // Client-side strict sync with smoothing
+                        const targetX = event.data.train.x;
+                        const targetSpeed = event.data.train.speed;
+
+                        // Strict sync: if the difference is huge (e.g. teleport), just snap it
+                        if (Math.abs(t.x - targetX) > 500) {
+                            t.x = targetX;
+                        } else {
+                            t.x = t.x + (targetX - t.x) * 0.4;
+                        }
+                        t.speed = targetSpeed;
                     }
                 } else if (event.data.type === 'GLOBAL_RESTART') {
                     setVedalMessage("HOST INITIATED RESTART!||房主已重啟遊戲！");
@@ -505,17 +552,41 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         };
 
         // Hook into gameRefs for easy event access from App.tsx
-        (window as any).gameRefs.handleMpEvent = handleMpEvent;
-        return () => { if ((window as any).gameRefs) (window as any).gameRefs.handleMpEvent = undefined; };
+        // Use a unique name to avoid conflict with App.tsx's handler
+        // Fix: Use separate check for manager to keep registration stable
+        if (multiplayer?.isActive) {
+            if (!(window as any).gameRefs) (window as any).gameRefs = {};
+            (window as any).gameRefs.handleCanvasMpEvent = handleMpEvent;
+        }
+        return () => {
+            if ((window as any).gameRefs) (window as any).gameRefs.handleCanvasMpEvent = undefined;
+        };
 
-    }, [multiplayer, resetDroneState, respawnLevel, setGameState, setFaceStatus, setVedalMessage]);
+    }, [multiplayer?.isActive, resetDroneState, respawnLevel, setGameState, setFaceStatus, setVedalMessage]);
 
     // Host Broadcast Loop
     useEffect(() => {
         if (!multiplayer?.isActive || !multiplayer.manager || !multiplayer.isHost) return;
         const interval = setInterval(() => {
-            if (gameState === GameState.PLAYING) {
+            if (gameState === GameState.PLAYING || gameState === GameState.GAME_OVER) {
                 const train = levelRef.current.train;
+
+                // Host calculates the target for the train based on slowest living player
+                let minX = droneRef.current.pos.x;
+                multiplayer.remotePlayers.forEach(p => {
+                    if (p.health > 0) minX = Math.min(minX, p.pos.x);
+                });
+
+                // Adjust train speed relative to the slowest player
+                const distFromTrain = minX - train.x;
+                let targetSpeed = 3.5;
+                if (distFromTrain > 1500) targetSpeed = 10;
+                else if (distFromTrain > 800) targetSpeed = 6;
+                else targetSpeed = 3.5 + (minX / 5000);
+
+                train.speed = targetSpeed;
+                // Note: Train X movement is still done in the main loop for the host.
+
                 multiplayer.manager?.broadcast({ type: 'SYNC_ENV', train: { x: train.x, speed: train.speed } });
             }
         }, 100);
@@ -543,6 +614,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             respawnLevel();
         }
     }, [respawnToken, respawnLevel]);
+
+    // [FAILSAFE] Force cleanup when GameState becomes PLAYING
+    // This handles cases where respawnToken might be missed or desynced
+    useEffect(() => {
+        if (gameState === GameState.PLAYING) {
+            // Clear Death State
+            if (deathSequenceRef.current || debrisRef.current.length > 0) {
+                debrisRef.current = [];
+                deathSequenceRef.current = null;
+                setFaceStatus('idle');
+
+                // Ensure drone is alive
+                if (droneRef.current.health <= 0) {
+                    droneRef.current.health = droneRef.current.maxHealth;
+                    droneRef.current.pos = { x: lastCheckpoint.x, y: lastCheckpoint.y };
+                    droneRef.current.vel = { x: 0, y: 0 };
+                }
+            }
+        }
+    }, [gameState, lastCheckpoint, setFaceStatus]);
 
     // Input Handling
     useEffect(() => {
@@ -671,7 +762,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             });
 
             // --- PHYSICS UPDATE ---
-            if (gameState === GameState.PLAYING || (deathSequenceRef.current && deathSequenceRef.current.step === 'dying')) {
+            // [MULTIPLAYER FIX] Allow physics (especially train) to run in GAME_OVER if multiplayer
+            if (gameState === GameState.PLAYING || (deathSequenceRef.current && deathSequenceRef.current.step === 'dying') || (multiplayer?.isActive && gameState === GameState.GAME_OVER)) {
                 // Decay Visual FX (Even during hit stop for smoothness)
                 if (shakeRef.current > 0) shakeRef.current *= 0.85;
                 if (shakeRef.current < 0.1) shakeRef.current = 0;
@@ -745,7 +837,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Stop condition: settle MUCH faster (800ms max or motion < 3.0)
                     if (totalMotion < 3.0 || (performance.now() - ds.startTime) > 800) {
                         ds.step = 'dead';
-                        onCrash(ds.reason, ds.distance, ds.trajectory, ds.cargoTrajectory, ds.trainX);
+                        onCrash(ds.reason, ds.distance, ds.trajectory, ds.cargoTrajectory, levelRef.current.train.x);
                     }
                 }
 
@@ -756,8 +848,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     return t.life > 0;
                 });
 
-                // --- WORLD UPDATES (Run during PLAYING or dying) ---
-                if (gameState === GameState.PLAYING || (deathSequenceRef.current && deathSequenceRef.current.step === 'dying')) {
+                // --- WORLD UPDATES (Run during PLAYING or dying or SPECTATING) ---
+                if (gameState === GameState.PLAYING || (deathSequenceRef.current && deathSequenceRef.current.step === 'dying') || (multiplayer?.isActive && gameState === GameState.GAME_OVER)) {
                     // Update Urgent Order Timer
                     if (activeOrderRef.current.active) {
                         activeOrderRef.current.timeLeft -= dt / 60;
@@ -774,19 +866,61 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         }
                     }
 
-                    // Train Logic (Hype Train follows you)
-                    const distFromTrain = drone.pos.x - train.x;
-                    if (distFromTrain > 1500) train.speed = 10;
-                    else if (distFromTrain > 800) train.speed = 6;
-                    else train.speed = 3.5 + (drone.pos.x / 5000);
+                    // Train Logic
+                    if (!multiplayer?.isActive || multiplayer?.isHost) {
+                        // Autonomous movement for Solo or Host
+                        const distFromTrain = drone.pos.x - train.x;
+                        if (!multiplayer?.isActive) {
+                            // Solo mode logic (already exists - targeting current drone)
+                            if (distFromTrain > 1500) train.speed = 10;
+                            else if (distFromTrain > 800) train.speed = 6;
+                            else train.speed = 3.5 + (drone.pos.x / 5000);
+                        }
+                        // Host uses the speed calculated in its effect
+                        train.x += train.speed * (dt * 0.6);
+                    } else {
+                        // Clients: Interpolate towards broadcast position
+                        train.x += train.speed * (dt * 0.6);
+                    }
 
-                    train.x += train.speed * (dt * 0.6);
+                    if (trainGraceTimerRef.current > 0) {
+                        trainGraceTimerRef.current -= dt / 60;
+                    }
 
-                    if (train.x > drone.pos.x - 50 && !drone.isGodMode && drone.health > 0 && !deathSequenceRef.current) {
+                    if (train.x > drone.pos.x - 50 && !drone.isGodMode && drone.health > 0 && !deathSequenceRef.current && trainGraceTimerRef.current <= 0) {
                         setFaceStatus('dead');
                         setVedalMessage("HYPE OVERLOAD! TOO SLOW!||發燒列車爆炸！太慢了！");
                         lastDamageSource.current = 'TRAIN';
                         triggerDeathSequence(drone.pos, 'TRAIN', Math.floor(maxDistanceRef.current / 10), trajectoryRef.current, cargoTrajectoryRef.current, levelRef.current.train.x);
+                    }
+
+                    // [MULTIPLAYER] Checkpoint Destruction Check
+                    if (multiplayer?.isActive && !checkpointDestroyedRef.current && train.x > lastCheckpoint.x + 100) {
+                        checkpointDestroyedRef.current = true;
+                        SoundManager.play('crash');
+
+                        // Visual FX: Spawn Debris
+                        const pieces: Debris[] = [];
+                        for (let i = 0; i < 8; i++) {
+                            const angle = Math.random() * Math.PI * 2;
+                            const speed = 3 + Math.random() * 5;
+                            pieces.push({
+                                x: lastCheckpoint.x + (Math.random() * 200),
+                                y: 880 + (Math.random() * 20),
+                                vx: Math.cos(angle) * speed,
+                                vy: Math.sin(angle) * speed - 5,
+                                angle: Math.random() * Math.PI * 2,
+                                va: (Math.random() - 0.5) * 0.5,
+                                size: 4 + Math.random() * 6,
+                                color: '#22c55e', // Green checkpoint color
+                                life: 1.0
+                            });
+                        }
+                        // Add to existing debris
+                        debrisRef.current = [...debrisRef.current, ...pieces];
+
+                        // Remove Checkpoint Wall
+                        levelRef.current.walls = levelRef.current.walls.filter(w => w.type !== 'checkpoint');
                     }
                 }
 
@@ -1290,7 +1424,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                     }
 
                                     // 4. Damage Logic
-                                    if (impactSpeed > Constants.DAMAGE_THRESHOLD && hasLaunchedRef.current) {
+                                    if (impactSpeed > Constants.DAMAGE_THRESHOLD) {
                                         let damage = Math.floor(impactSpeed * 5);
                                         if (isArmored) damage = Math.floor(damage * 0.7);
 
@@ -1343,7 +1477,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Throttle UI updates to ~10fps to save performance
                     statsThrottleTimer += dt;
                     if (statsThrottleTimer >= 6) {
-                        setStats(hpPct, fuelPct, cargoPct, scaledDistance, distToNext);
+                        setStats(hpPct, fuelPct, cargoPct, scaledDistance, distToNext, levelRef.current.train.x);
                         statsThrottleTimer = 0;
                     }
 
@@ -1356,7 +1490,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 pos: drone.pos,
                                 angle: drone.angle,
                                 health: drone.health,
-                                persona
+                                persona,
+                                cargoPos: cargo.pos,
+                                cargoAngle: cargo.angle,
+                                thrustPower: drone.thrustPower
                             });
                             mpSyncTimerRef.current = 0;
                         }
@@ -1573,13 +1710,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- RENDER REMOTE PLAYERS ---
             if (multiplayer?.isActive) {
                 multiplayer.remotePlayers.forEach(p => {
+                    // Draw Rope & Cargo if available
+                    if (p.cargoPos) {
+                        ctx.beginPath();
+                        ctx.moveTo(p.pos.x, p.pos.y);
+                        ctx.lineTo(p.cargoPos.x, p.cargoPos.y);
+                        ctx.strokeStyle = 'rgba(203, 213, 225, 0.4)';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+
+                        ctx.save();
+                        ctx.translate(p.cargoPos.x, p.cargoPos.y);
+                        if (p.cargoAngle !== undefined) ctx.rotate(p.cargoAngle);
+                        ctx.fillStyle = 'rgba(217, 119, 6, 0.6)';
+                        ctx.fillRect(-12, -12, 24, 24);
+                        ctx.restore();
+                    }
+
+                    // Draw Drone
                     ctx.save(); ctx.translate(p.pos.x, p.pos.y); ctx.rotate(p.angle);
+
+                    // Body
                     ctx.fillStyle = p.persona === Persona.EVIL ? '#ef4444' : '#f472b6';
-                    ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+                    ctx.globalAlpha = 0.7; ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
+
+                    // Eyes
                     ctx.fillStyle = '#fff'; ctx.fillRect(-5, -8, 4, 4); ctx.fillRect(1, -8, 4, 4);
+
+                    // Thrust Effect
+                    if (p.thrustPower && p.thrustPower > 0) {
+                        ctx.fillStyle = p.persona === Persona.EVIL ? 'rgba(252, 165, 165, 0.5)' : 'rgba(96, 165, 250, 0.5)';
+                        ctx.beginPath(); ctx.moveTo(-6, 10); ctx.lineTo(0, 20 + Math.random() * 5); ctx.lineTo(6, 10); ctx.fill();
+                    }
+
+                    // Rotors
+                    const rotorOffset = Math.sin(time * 0.5) * 5;
+                    ctx.fillStyle = 'rgba(148, 163, 184, 0.5)';
+                    ctx.fillRect(-22, -4, 18, 2);
+                    ctx.fillRect(4, -4, 18, 2);
+                    ctx.fillStyle = 'rgba(226, 232, 240, 0.4)';
+                    ctx.fillRect(-26, -6 + rotorOffset / 4, 22, 2);
+                    ctx.fillRect(4, -6 - rotorOffset / 4, 22, 2);
+
                     ctx.restore();
+
+                    // Name/ID (优先显示名字)
                     ctx.save(); ctx.translate(p.pos.x, p.pos.y);
-                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; ctx.font = '12px monospace'; ctx.textAlign = 'center';
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'; ctx.font = '12px VT323'; ctx.textAlign = 'center';
+                    // We don't have the player name easily in the remotePlayers map unless we sync it, 
+                    // but we can use the ID slice for now as per previous logic.
                     ctx.fillText(p.id.slice(-4), 0, -25);
                     ctx.restore();
                 });

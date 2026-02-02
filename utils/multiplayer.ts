@@ -7,6 +7,9 @@ export interface RemotePlayer {
     angle: number;
     health: number;
     persona: string;
+    cargoPos?: { x: number, y: number };
+    cargoAngle?: number;
+    thrustPower?: number;
     lastUpdate: number;
 }
 

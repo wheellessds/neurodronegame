@@ -103,6 +103,7 @@ const App: React.FC = () => {
   const [isSpectating, setIsSpectating] = useState(false);
   const [roomLeaderboard, setRoomLeaderboard] = useState<{ id: string, distance: number, persona: string, isDead: boolean }[]>([]);
   const [allPlayersDead, setAllPlayersDead] = useState(false);
+  const [isPermanentlyDead, setIsPermanentlyDead] = useState(false);
 
   // Refs for stable handleMultiplayerEvent state access
   const gameStateRef = useRef(gameState);
@@ -209,6 +210,9 @@ const App: React.FC = () => {
             angle: event.data.angle,
             health: event.data.health,
             persona: event.data.persona,
+            cargoPos: event.data.cargoPos,
+            cargoAngle: event.data.cargoAngle,
+            thrustPower: event.data.thrustPower,
             lastUpdate: Date.now()
           });
           return next;
@@ -252,6 +256,7 @@ const App: React.FC = () => {
       } else if (event.data.type === 'GAME_RESTART') {
         // Host restarted the game - reset everything
         setAllPlayersDead(false);
+        setIsPermanentlyDead(false);
         setRoomLeaderboard([]);
         setGameKey(k => k + 1);
         setGameState(GameState.WAITING_LOBBY);
@@ -261,6 +266,8 @@ const App: React.FC = () => {
         setJoinApproved(true);
         setVedalMessage("HOST APPROVED YOUR ENTRY!||房主已批准加入！");
       }
+      // Round 2 Fix: Forward all DATA events to GameCanvas's unique handler
+      (window as any).gameRefs?.handleCanvasMpEvent?.(event);
     } else if (event.type === 'ERROR') {
       setVedalMessage(`Error: ${event.message}||錯誤：${event.message}`);
       setJoinError(event.message);
@@ -430,6 +437,18 @@ const App: React.FC = () => {
     setShowSettings(false); // Force close settings
   };
 
+  const setStats = useCallback((hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number, trainX?: number) => {
+    setDisplayStats({ hp, fuel, cargoHp, distance, distToNext });
+
+    // Elimination Mode Check: If train passed current checkpoint while in Game Over
+    if (gameState === GameState.GAME_OVER && multiplayerMode && trainX !== undefined && !isPermanentlyDead) {
+      if (trainX >= lastCheckpoint.x) {
+        setIsPermanentlyDead(true);
+        setVedalMessage("CHECKPOINT CONSUMED BY HYPE TRAIN! NO RESPAWN POSSIBLE.||存檔點已被發燒列車吞噬！無法重生。");
+      }
+    }
+  }, [gameState, multiplayerMode, lastCheckpoint.x, isPermanentlyDead]);
+
   const saveToLeaderboard = async (name: string, distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[]) => {
     const entry: LeaderboardEntry = {
       name, distance, time, date: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-'),
@@ -477,21 +496,47 @@ const App: React.FC = () => {
   };
 
   const handleRespawn = useCallback(() => {
+    if (isPermanentlyDead) {
+      setVedalMessage("Checkpoint consumed. Mission failed permanently.||存檔點已毀。任務永久失敗。");
+      return;
+    }
     SoundManager.play('shop');
-    setGameKey(k => k + 1); // Force map regeneration
+
+    // [MULTIPLAYER FIX] In multiplayer, do NOT remount GameCanvas (change key) on respawn.
+    // This preserves the train instance and state.
+    if (!multiplayerMode) {
+      setGameKey(k => k + 1); // Force map regeneration only in single player
+    }
+
     setRespawnToken(t => t + 1);
     setGameState(GameState.PLAYING);
     setUrgentOrderProgress(null);
     setIsSpectating(false);
-  }, []);
+  }, [isPermanentlyDead, multiplayerMode]);
 
   const handleCrash = useCallback((reason: string, finalDist: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], trainX?: number) => {
-    // Multiplayer Logic: Check if train passed last checkpoint
-    if (multiplayerMode && trainX !== undefined && trainX < lastCheckpoint.x) {
-      // Insta-Respawn
-      handleRespawn();
-      setVedalMessage("Neuro Re-fabricated!||Neuro 重組完成！");
-      return;
+    // Multiplayer Logic: Elimination Mode
+    if (multiplayerMode && trainX !== undefined) {
+      // [FIX] 3-State Respawn Logic
+      // 1. Train Passed Checkpoint -> Permanent Death
+      // 2. Train Close (Danger Zone) -> Manual Respawn (Prevents infinite loop)
+      // 3. Train Far (Safe) -> Auto Respawn
+
+      if (trainX >= lastCheckpoint.x) {
+        // [CASE 1] Checkpoint Consumed
+        setIsPermanentlyDead(true);
+        setVedalMessage("CHECKPOINT CONSUMED BY HYPE TRAIN! NO RESPAWN POSSIBLE.||存檔點已被發燒列車吞噬！無法重生。");
+      } else if (trainX < lastCheckpoint.x - 400) {
+        // [CASE 3] Safe -> Auto Respawn
+        handleRespawn();
+        setVedalMessage("Neuro Re-fabricated! Checkpoint is safe.||Neuro 重組完成！存檔點安全。");
+        return;
+      } else {
+        // [CASE 2] Danger Zone (Train is approaching checkpoint)
+        // Show Game Over screen to break the infinite death loop
+        setVedalMessage("WARNING: TRAIN INCOMING! RESPAWN CAREFULLY!||警告：火車逼近！請小心重生！");
+        // Fall through to normal GAME_OVER to allow manual respawn
+      }
     }
 
     SoundManager.play('crash');
@@ -1186,7 +1231,7 @@ const App: React.FC = () => {
         onCrash={handleCrash}
         setFaceStatus={setFaceStatus}
         setVedalMessage={setVedalMessage}
-        setStats={(hp, fuel, cargoHp, distance, distToNext) => setDisplayStats({ hp, fuel, cargoHp, distance, distToNext })}
+        setStats={(hp, fuel, cargoHp, distance, distToNext, trainX) => setStats(hp, fuel, cargoHp, distance, distToNext, trainX)}
         lastCheckpoint={lastCheckpoint}
         setLastCheckpoint={setLastCheckpoint}
         respawnToken={respawnToken}
