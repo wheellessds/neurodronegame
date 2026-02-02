@@ -466,9 +466,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         const startWallX = lastCheckpoint.x - 400;
 
-        // Safe "Runway" removed as per user request
-        // levelRef.current.walls.push({ x: startWallX - 400, y: 900, w: 1200, h: 1000, type: 'wall' }); // Floor
-        // levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
+        // Safe Runway - Restored as per user request
+        levelRef.current.walls.push({ x: startWallX - 400, y: 900, w: 1200, h: 1000, type: 'wall' }); // Floor
+        levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
 
         // The checkpoint pad
         const cpWallX = lastCheckpoint.x - 200;
