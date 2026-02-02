@@ -1,0 +1,81 @@
+/* 頭像動畫效果 */
+
+/* 閒置時的輕微漂浮 */
+@keyframes avatar-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* 慌張時的抖動 */
+@keyframes avatar-shake {
+  0%, 100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  10% {
+    transform: translate(-2px, -1px) rotate(-1deg);
+  }
+  20% {
+    transform: translate(2px, 1px) rotate(1deg);
+  }
+  30% {
+    transform: translate(-2px, 1px) rotate(-1deg);
+  }
+  40% {
+    transform: translate(2px, -1px) rotate(1deg);
+  }
+  50% {
+    transform: translate(-2px, -1px) rotate(-1deg);
+  }
+  60% {
+    transform: translate(2px, 1px) rotate(1deg);
+  }
+  70% {
+    transform: translate(-2px, 1px) rotate(-1deg);
+  }
+  80% {
+    transform: translate(2px, -1px) rotate(1deg);
+  }
+  90% {
+    transform: translate(-2px, -1px) rotate(-1deg);
+  }
+}
+
+/* 獲勝時的發光效果 */
+@keyframes avatar-glow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(251, 191, 36, 0.5),
+                0 0 20px rgba(251, 191, 36, 0.3),
+                0 0 30px rgba(251, 191, 36, 0.1);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(251, 191, 36, 0.8),
+                0 0 40px rgba(251, 191, 36, 0.5),
+                0 0 60px rgba(251, 191, 36, 0.3);
+  }
+}
+
+/* 高速時的脈動效果 */
+@keyframes avatar-pulse-fast {
+  0%, 100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.05);
+    filter: brightness(1.2);
+  }
+}
+
+/* 死亡時的淡出效果 */
+@keyframes avatar-fade {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}

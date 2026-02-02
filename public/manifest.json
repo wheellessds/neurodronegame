@@ -1,0 +1,16 @@
+{
+    "name": "Neuro Drone Delivery 2",
+    "short_name": "NeuroDrone2",
+    "description": "Neuro's Drone Delivery Service 2: Endless Nightmare",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#0f172a",
+    "theme_color": "#ec4899",
+    "icons": [
+        {
+            "src": "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/poke-ball.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        }
+    ]
+}

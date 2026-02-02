@@ -1,0 +1,5 @@
+{
+  "name": "Neuro's Drone Delivery Service 2",
+  "description": "A high-difficulty physics-based delivery game featuring Neuro-sama. Battle inertia, input lag, and the filter to deliver packages.",
+  "requestFramePermissions": []
+}

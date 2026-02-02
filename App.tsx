@@ -1,0 +1,1297 @@
+
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { GameCanvas } from './components/GameCanvas';
+import { Shop } from './components/Shop';
+import { UIOverlay } from './components/UIOverlay';
+import { MobileControls } from './components/MobileControls';
+import { LeaderboardEntry, ControlsConfig, GameState, Persona, UpgradeStats, Vector2, EquipmentId } from './types';
+import { INITIAL_MONEY } from './constants';
+import { SoundManager } from './utils/audio';
+import { NeuroFace } from './components/NeuroFace';
+import { Leaderboard } from './components/Leaderboard';
+import { SettingsOverlay } from './components/SettingsOverlay';
+import { LoadingScreen } from './components/LoadingScreen';
+import { preloadAssets } from './utils/assetLoader';
+import { MultiplayerManager, RemotePlayer, MultiplayerEvent } from './utils/multiplayer';
+
+// Assets to preload
+import neuroIdle from './assets/face/neuro_idle.gif';
+import neuroPanic from './assets/face/neuro_panic.gif';
+import neuroWin from './assets/face/neuro_win.jpg';
+import neuroDead from './assets/face/neuro_dead.gif';
+import evilIdle from './assets/face/evil_idle.jpg';
+import evilPanic from './assets/face/evil_panic.gif';
+import evilWin from './assets/face/evil_win.png';
+import evilDead from './assets/face/evil_dead.jpg';
+
+const DEFAULT_CONTROLS: ControlsConfig = {
+  keys: {
+    thrust: 'w',
+    left: 'a',
+    right: 'd',
+    pause: 'Escape'
+  },
+  mobile: {
+    thrust: { x: 10, y: 15 },
+    left: { x: 30, y: 15 },
+    right: { x: 10, y: 15 },
+    joystick: { x: 15, y: 15 }
+  }
+};
+
+const App: React.FC = () => {
+  const [gameState, setGameState] = useState<GameState>(GameState.LOADING);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState('Initializing Neural Networks...');
+  const [persona, setPersona] = useState<Persona>(Persona.NEURO);
+  const [difficulty, setDifficulty] = useState<'NORMAL' | 'EASY'>('NORMAL');
+  const [money, setMoney] = useState(INITIAL_MONEY);
+  const [gameKey, setGameKey] = useState(0);
+  const [respawnToken, setRespawnToken] = useState(0);
+  const [highScore, setHighScore] = useState(0);
+  const [gameTime, setGameTime] = useState(0);
+  const [finalDistance, setFinalDistance] = useState(0);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [pendingScore, setPendingScore] = useState<{ distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[] } | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const [postScoreAction, setPostScoreAction] = useState<'RESTART' | 'MENU' | null>(null);
+
+  const [isMobileMode, setIsMobileMode] = useState(false);
+  const [currentSeed, setCurrentSeed] = useState(Math.random().toString(36).substring(2, 9).toUpperCase());
+  const [isChallengingSeed, setIsChallengingSeed] = useState(false);
+  const [ghostData, setGhostData] = useState<{ trajectory: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name: string } | null>(null);
+  const [currentTrajectory, setCurrentTrajectory] = useState<{ x: number, y: number }[]>([]);
+  const [currentCargoTrajectory, setCurrentCargoTrajectory] = useState<{ x: number, y: number }[]>([]);
+
+  const [lastCheckpoint, setLastCheckpoint] = useState<Vector2>({ x: 200, y: 860 });
+  const [ownedItems, setOwnedItems] = useState<EquipmentId[]>(['default']);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [equippedItem, setEquippedItem] = useState<EquipmentId>('NONE');
+  const [displayStats, setDisplayStats] = useState({ hp: 100, fuel: 100, cargoHp: 100, distance: 0, distToNext: 0 });
+  const [faceStatus, setFaceStatus] = useState<'idle' | 'panic' | 'dead' | 'win' | 'fast'>('idle');
+  const [vedalMessage, setVedalMessage] = useState("Deliver the Rum. Don't break it.||運送蘭姆酒，別打破了。");
+  const [urgentOrderProgress, setUrgentOrderProgress] = useState<{ percent: number, timeLeft: number } | null>(null);
+
+  const [upgrades, setUpgrades] = useState<UpgradeStats>({
+    engineLevel: 0, tankLevel: 0, hullLevel: 0, cableLevel: 0, cargoLevel: 0, money: INITIAL_MONEY
+  });
+
+  // Multiplayer State
+  const [multiplayerMode, setMultiplayerMode] = useState<boolean>(false);
+  const [multiplayerId, setMultiplayerId] = useState<string | null>(null);
+  const [roomToJoin, setRoomToJoin] = useState('');
+  const [remotePlayers, setRemotePlayers] = useState<Map<string, RemotePlayer>>(new Map());
+  const [isMultiplayerHost, setIsMultiplayerHost] = useState(false);
+  const mpManagerRef = useRef<MultiplayerManager | null>(null);
+
+  // New States for Room Admin & Browser
+  const [showRoomBrowser, setShowRoomBrowser] = useState(false);
+  const [roomList, setRoomList] = useState<any[]>([]);
+  const [waitingApproval, setWaitingApproval] = useState(false);
+  const [joinApproved, setJoinApproved] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [autoJoin, setAutoJoin] = useState(false);
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem('neuro_drone_name') || `Drone-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [roomParticipants, setRoomParticipants] = useState<{ id: string, name: string }[]>([]);
+
+  const [showAdmin, setShowAdmin] = useState(false);
+  const [adminCommand, setAdminCommand] = useState('');
+  const adminInputRef = useRef<HTMLInputElement>(null);
+  const [deathDetails, setDeathDetails] = useState({ reason: '', reasonDisplay: '', taunt: '' });
+  const [isSpectating, setIsSpectating] = useState(false);
+  const [roomLeaderboard, setRoomLeaderboard] = useState<{ id: string, distance: number, persona: string, isDead: boolean }[]>([]);
+  const [allPlayersDead, setAllPlayersDead] = useState(false);
+
+  // Refs for stable handleMultiplayerEvent state access
+  const gameStateRef = useRef(gameState);
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  const remotePlayersRef = useRef(remotePlayers);
+  useEffect(() => { remotePlayersRef.current = remotePlayers; }, [remotePlayers]);
+
+  // Custom Controls State
+  const [controlsConfig, setControlsConfig] = useState<ControlsConfig>(DEFAULT_CONTROLS);
+  const [isLayoutEditing, setIsLayoutEditing] = useState(false);
+
+  useEffect(() => {
+    const handleFSChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handleFSChange);
+    return () => document.removeEventListener('fullscreenchange', handleFSChange);
+  }, []);
+
+  useEffect(() => {
+    const savedDist = localStorage.getItem('neuro_drone_highscore_dist');
+    if (savedDist) setHighScore(parseInt(savedDist, 10));
+
+    const savedControls = localStorage.getItem('neuro_drone_controls');
+    if (savedControls) {
+      try {
+        const parsed = JSON.parse(savedControls);
+        setControlsConfig({
+          keys: { ...DEFAULT_CONTROLS.keys, ...parsed.keys },
+          mobile: { ...DEFAULT_CONTROLS.mobile, ...parsed.mobile }
+        });
+      } catch (e) {
+        console.error("Failed to load controls", e);
+      }
+    }
+
+    fetch('/api/leaderboard').then(res => res.json()).then(data => {
+      setLeaderboard(data);
+      if (data.length > 0) setHighScore(prev => Math.max(prev, data[0].distance));
+    }).catch(e => console.error("Failed to load leaderboard", e));
+
+    const assets = [
+      neuroIdle, neuroPanic, neuroWin, neuroDead,
+      evilIdle, evilPanic, evilWin, evilDead
+    ];
+
+    const messages = [
+      "Calibrating Gyroscopes...",
+      "Refining Neural Pathways...",
+      "Polishing Rum Bottles...",
+      "Warming up Evil's Sass...",
+      "Calculating Optimal Delivery Routes...",
+      "Bribing Vedal with Coffee...",
+      "Loading Turtle Swarm..."
+    ];
+
+    preloadAssets(assets, (p) => {
+      setLoadingProgress(p.percent);
+      setLoadingMessage(messages[Math.floor((p.percent / 101) * messages.length)]);
+    }).then(() => {
+      setTimeout(() => setGameState(GameState.MENU), 500);
+    });
+  }, []);
+
+  // Initialize Multiplayer
+  // Define Multiplayer Event Handler
+  const handleMultiplayerEvent = useCallback((event: MultiplayerEvent) => {
+    if (event.type === 'CONNECTED') {
+      setMultiplayerId(event.peerId);
+      setVedalMessage("Online functionality ready!||連線功能準備就緒！");
+    } else if (event.type === 'PLAYER_JOINED') {
+      setVedalMessage("A new drone has entered the airspace!||有新的無人機進入空域！");
+      if (mpManagerRef.current && !mpManagerRef.current.isHost) {
+        setIsMultiplayerHost(false);
+      }
+    } else if (event.type === 'PLAYER_LEFT') {
+      setRemotePlayers(prev => {
+        const next = new Map(prev);
+        next.delete(event.id);
+        return next;
+      });
+    } else if (event.type === 'DATA') {
+      // Handle System Events
+      if (event.id === 'SYSTEM') {
+        if (event.data.type === 'PENDING_REQUESTS_UPDATE') {
+          setRemotePlayers(prev => new Map(prev)); // Force update
+          if (mpManagerRef.current?.pendingRequests.length > 0) {
+            setVedalMessage(`New Join Request! check Settings > Admin.||有新的加入請求！請查看設定 > Admin。`);
+          }
+        } else if (event.data.type === 'KICKED') {
+          console.log('You have been KICKED.');
+          setVedalMessage("You have been kicked by the host.||你已被房主踢出房間。");
+          setGameState(GameState.MENU);
+          setJoinApproved(false);
+        } else if (event.data.type === 'ROOM_SYNC') {
+          setRoomParticipants(event.data.participants);
+        }
+      }
+
+      if (event.data.type === 'PLAYER_STATE') {
+        setRemotePlayers(prev => {
+          const next = new Map(prev);
+          next.set(event.id, {
+            id: event.id,
+            pos: event.data.pos,
+            angle: event.data.angle,
+            health: event.data.health,
+            persona: event.data.persona,
+            lastUpdate: Date.now()
+          });
+          return next;
+        });
+      } else if (event.data.type === 'SYNC_SEED') {
+        setVedalMessage("Host synced the world seed!||房主同步了世界種子！");
+        setCurrentSeed(event.data.seed);
+        setGameState(prev => {
+          if (prev !== GameState.WAITING_LOBBY && prev !== GameState.PLAYING) {
+            return GameState.MENU;
+          }
+          return prev;
+        });
+      } else if (event.data.type === 'GAME_START') {
+        // Increment gameKey to force map regeneration
+        setGameKey(k => k + 1);
+        setGameState(GameState.PLAYING);
+        setVedalMessage("HOST STARTED THE GAME!||房主開始了遊戲！");
+      } else if (event.data.type === 'PLAYER_DEATH') {
+        // Update room leaderboard
+        setRoomLeaderboard(prev => {
+          const existing = prev.find(p => p.id === event.id);
+          if (existing) {
+            return prev.map(p => p.id === event.id ? { ...p, distance: event.data.distance, isDead: true } : p);
+          } else {
+            return [...prev, { id: event.id, distance: event.data.distance, persona: event.data.persona || 'NEURO', isDead: true }];
+          }
+        });
+        // Check if all players are dead
+        setTimeout(() => {
+          setRoomLeaderboard(current => {
+            const totalPlayers = remotePlayersRef.current.size + 1; // +1 for self
+            const deadPlayers = current.filter(p => p.isDead).length;
+            if (deadPlayers >= totalPlayers && totalPlayers > 1) {
+              setAllPlayersDead(true);
+              setIsSpectating(false);
+            }
+            return current;
+          });
+        }, 100);
+      } else if (event.data.type === 'GAME_RESTART') {
+        // Host restarted the game - reset everything
+        setAllPlayersDead(false);
+        setRoomLeaderboard([]);
+        setGameKey(k => k + 1);
+        setGameState(GameState.WAITING_LOBBY);
+        setVedalMessage("Host restarted the game!||房主重新開始了遊戲！");
+      } else if (event.data.type === 'JOIN_APPROVED') {
+        setWaitingApproval(false);
+        setJoinApproved(true);
+        setVedalMessage("HOST APPROVED YOUR ENTRY!||房主已批准加入！");
+      }
+    } else if (event.type === 'ERROR') {
+      setVedalMessage(`Error: ${event.message}||錯誤：${event.message}`);
+      setJoinError(event.message);
+      setWaitingApproval(false);
+      setJoinApproved(false);
+    }
+  }, [playerName]);
+
+  // Initialize Multiplayer Effect
+  useEffect(() => {
+    // Expose handler for SettingsOverlay
+    if (!(window as any).gameRefs) (window as any).gameRefs = {};
+    (window as any).gameRefs.handleMpEvent = handleMultiplayerEvent;
+
+    if (multiplayerMode && !mpManagerRef.current) {
+      mpManagerRef.current = new MultiplayerManager(handleMultiplayerEvent);
+      mpManagerRef.current.init();
+    }
+
+    return () => {
+      if (!multiplayerMode && mpManagerRef.current) {
+        mpManagerRef.current.disconnect();
+        mpManagerRef.current = null;
+        setMultiplayerId(null);
+        setJoinApproved(false);
+        setWaitingApproval(false);
+        setRoomParticipants([]);
+      }
+    };
+  }, [multiplayerMode, handleMultiplayerEvent]);
+
+  useEffect(() => {
+    if (mpManagerRef.current) {
+      mpManagerRef.current.myName = playerName;
+      localStorage.setItem('neuro_drone_name', playerName);
+    }
+  }, [playerName]);
+
+  useEffect(() => {
+    localStorage.setItem('neuro_drone_controls', JSON.stringify(controlsConfig));
+  }, [controlsConfig]);
+
+  useEffect(() => {
+    if (displayStats.distance > highScore) {
+      setHighScore(displayStats.distance);
+      localStorage.setItem('neuro_drone_highscore_dist', displayStats.distance.toString());
+    }
+  }, [displayStats.distance, highScore]);
+
+  // Timer logic
+  useEffect(() => {
+    let interval: any;
+    if ((gameState === GameState.PLAYING || gameState === GameState.CHECKPOINT_SHOP) && !isLayoutEditing) {
+      interval = setInterval(() => {
+        setGameTime(t => t + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [gameState, isLayoutEditing]);
+
+  const togglePause = useCallback(() => {
+    if (gameState === GameState.PLAYING) {
+      if (multiplayerMode) {
+        // In MP, don't pause game, just show settings
+        setShowSettings(true);
+      } else {
+        setGameState(GameState.PAUSED);
+        setShowSettings(true);
+      }
+      SoundManager.play('shop');
+    } else if (gameState === GameState.PAUSED) {
+      setGameState(GameState.PLAYING);
+      setShowSettings(false);
+      SoundManager.play('shop');
+    } else if (gameState === GameState.PLAYING && multiplayerMode && showSettings) {
+      // Close settings in MP
+      setShowSettings(false);
+    }
+  }, [gameState, multiplayerMode, showSettings]);
+
+  // Handle Pause Key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === controlsConfig.keys.pause) {
+        togglePause();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [togglePause, controlsConfig.keys.pause]);
+
+  const handleStart = (seedOrEntry?: string | LeaderboardEntry) => {
+    if (multiplayerMode && mpManagerRef.current) {
+      mpManagerRef.current.myName = playerName;
+    }
+    SoundManager.init();
+    SoundManager.play('shop');
+
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => { });
+    }
+
+    setLastCheckpoint({ x: 200, y: 860 });
+
+    let seedToUse: string | undefined;
+    let entryToChallenge: LeaderboardEntry | undefined;
+
+    if (typeof seedOrEntry === 'string') {
+      seedToUse = seedOrEntry;
+    } else if (seedOrEntry) {
+      entryToChallenge = seedOrEntry;
+      seedToUse = entryToChallenge.seed;
+    }
+
+    if (seedToUse) {
+      setCurrentSeed(seedToUse);
+      setIsChallengingSeed(true);
+      if (entryToChallenge && entryToChallenge.trajectory && entryToChallenge.trajectory.length > 0) {
+        setGhostData({
+          trajectory: entryToChallenge.trajectory,
+          cargoTrajectory: entryToChallenge.cargoTrajectory,
+          name: entryToChallenge.name
+        });
+      } else {
+        setGhostData(null);
+      }
+    } else if (gameState !== GameState.MENU) {
+      setCurrentSeed(Math.random().toString(36).substring(2, 9).toUpperCase());
+      setIsChallengingSeed(false);
+      setGhostData(null);
+    } else {
+      setIsChallengingSeed(false);
+      setGhostData(null);
+    }
+
+    setGameKey(k => k + 1);
+
+    // Multiplayer Flow: Enter Lobby first
+    if (multiplayerMode) {
+      if (!isMultiplayerHost && !joinApproved) {
+        setVedalMessage("Join a room and wait for approval!||請先加入房間並等待批准。");
+        return;
+      }
+      // Generate seed if not already set (for host)
+      if (!seedToUse && isMultiplayerHost) {
+        const newSeed = Math.random().toString(36).substring(2, 9).toUpperCase();
+        setCurrentSeed(newSeed);
+        // Broadcast seed to all connected players
+        if (mpManagerRef.current) {
+          mpManagerRef.current.broadcast({ type: 'SYNC_SEED', seed: newSeed });
+        }
+      } else if (!seedToUse && !isMultiplayerHost) {
+        // Client should already have seed from SYNC_SEED, but if not, wait for it
+        // Don't generate a random seed here
+      }
+      setGameState(GameState.WAITING_LOBBY);
+      return;
+    } else {
+      setGameState(GameState.PLAYING);
+    }
+
+    setUrgentOrderProgress(null);
+    setGameTime(0);
+    setCurrentTrajectory([]);
+    setCurrentCargoTrajectory([]);
+    setIsSpectating(false);
+    setShowSettings(false); // Force close settings
+  };
+
+  const saveToLeaderboard = async (name: string, distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[]) => {
+    const entry: LeaderboardEntry = {
+      name, distance, time, date: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-'),
+      persona, difficulty, isMobile: isMobileMode, seed: currentSeed, trajectory, cargoTrajectory
+    };
+
+    try {
+      await fetch('/api/leaderboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry)
+      });
+      const res = await fetch('/api/leaderboard');
+      const data = await res.json();
+      setLeaderboard(data);
+      setHighScore(prev => Math.max(prev, distance));
+      setPendingScore(null);
+
+      if (postScoreAction === 'RESTART') handleRestartFull();
+      else if (postScoreAction === 'MENU') {
+        setShowSettings(false);
+        setGameState(GameState.MENU);
+      }
+      setPostScoreAction(null);
+    } catch (e) {
+      console.error("Failed to save score", e);
+    }
+  };
+
+  const handleBackToMenu = () => {
+    if (finalDistance > 0 || displayStats.distance > 0) {
+      const dist = finalDistance || displayStats.distance;
+      const time = gameState === GameState.GAME_OVER ? gameTime : gameTime; // gameTime is already tracked
+      setPostScoreAction('MENU');
+      setPendingScore({
+        distance: dist,
+        time: time,
+        trajectory: currentTrajectory,
+        cargoTrajectory: currentCargoTrajectory
+      });
+    } else {
+      setShowSettings(false);
+      setGameState(GameState.MENU);
+    }
+  };
+
+  const handleRespawn = useCallback(() => {
+    SoundManager.play('shop');
+    setGameKey(k => k + 1); // Force map regeneration
+    setRespawnToken(t => t + 1);
+    setGameState(GameState.PLAYING);
+    setUrgentOrderProgress(null);
+    setIsSpectating(false);
+  }, []);
+
+  const handleCrash = useCallback((reason: string, finalDist: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], trainX?: number) => {
+    // Multiplayer Logic: Check if train passed last checkpoint
+    if (multiplayerMode && trainX !== undefined && trainX < lastCheckpoint.x) {
+      // Insta-Respawn
+      handleRespawn();
+      setVedalMessage("Neuro Re-fabricated!||Neuro 重組完成！");
+      return;
+    }
+
+    SoundManager.play('crash');
+    setGameState(GameState.GAME_OVER);
+    setUrgentOrderProgress(null);
+    setFinalDistance(finalDist);
+    const penalty = 50;
+    setMoney(prev => Math.max(0, prev - penalty));
+    setVedalMessage(`Mission Failed. -$${penalty} fee.||任務失敗。扣除 $${penalty} 手續費。`);
+
+    const TAUNTS: any = {
+      WALL: ["Bonk.||倒楣。", "Oof.||喔噗。", "Flat.||變扁了。"],
+      LASER: ["Grilled.||烤焦了。", "Zapped!!||中電！", "Medium Rare.||五分熟。"],
+      FUEL: ["Empty.||乾了。", "No Gas.||沒氣了。", "Walking Time?||該走路了？"],
+      CARGO: ["Broken.||打破了。", "Refunded.||退貨中。", "Vedal is mad.||主人要生氣了。"],
+      VOID: ["Lost.||迷失了。", "Deep.||深不可測。", "Bye bye.||掰掰。"],
+      TRAIN: ["Choo Choo!||火車快跑！", "Railed.||被輾過了。", "Ticket please?||請出示車票？"]
+    };
+    const DEATH_DISPLAY_NAMES: any = { WALL: "撞擊", LASER: "雷射", FUEL: "沒油", CARGO: "貨損", VOID: "深淵", TRAIN: "遭列車輾斃" };
+
+    const list = TAUNTS[reason] || TAUNTS['WALL'];
+    const taunt = list[Math.floor(Math.random() * list.length)];
+    setDeathDetails({ reason, reasonDisplay: DEATH_DISPLAY_NAMES[reason] || reason, taunt });
+
+    if (finalDist > highScore) setHighScore(finalDist);
+    setCurrentTrajectory(trajectory || []);
+    setCurrentCargoTrajectory(cargoTrajectory || []);
+
+    // Multiplayer: Broadcast death and update room leaderboard
+    if (multiplayerMode && mpManagerRef.current) {
+      mpManagerRef.current.broadcast({
+        type: 'PLAYER_DEATH',
+        distance: finalDist,
+        persona: persona === Persona.NEURO ? 'NEURO' : 'EVIL'
+      });
+
+      // Add self to room leaderboard
+      setRoomLeaderboard(prev => {
+        const myId = multiplayerId || 'ME';
+        const existing = prev.find(p => p.id === myId);
+        if (existing) {
+          return prev.map(p => p.id === myId ? { ...p, distance: finalDist, isDead: true } : p);
+        } else {
+          return [...prev, { id: myId, distance: finalDist, persona: persona === Persona.NEURO ? 'NEURO' : 'EVIL', isDead: true }];
+        }
+      });
+
+      // Check if all players are dead
+      setTimeout(() => {
+        const totalPlayers = remotePlayersRef.current.size + 1;
+        setRoomLeaderboard(current => {
+          const deadPlayers = current.filter(p => p.isDead).length;
+          if (deadPlayers >= totalPlayers && totalPlayers > 1) {
+            setAllPlayersDead(true);
+            setIsSpectating(false);
+          }
+          return current;
+        });
+      }, 100);
+    }
+  }, [highScore, multiplayerMode, lastCheckpoint, handleRespawn, mpManagerRef, multiplayerId, persona]);
+
+  const handleBuyUpgrade = (type: keyof UpgradeStats, cost: number) => {
+    if (money >= cost) {
+      SoundManager.play('coin');
+      setMoney(prev => prev - cost);
+      setUpgrades(prev => ({ ...prev, [type]: (prev[type] as number) + 1 }));
+    }
+  };
+
+  const handleRandomUpgrade = useCallback((upgradeName: string) => {
+    const keys: (keyof UpgradeStats)[] = ['engineLevel', 'tankLevel', 'hullLevel', 'cableLevel', 'cargoLevel'];
+    const randomKey = keys[Math.floor(Math.random() * keys.length)];
+    setUpgrades(prev => ({ ...prev, [randomKey]: (prev[randomKey] as number) + 1 }));
+    const names: { [key: string]: string } = { engineLevel: "Thrusters", tankLevel: "Fuel Tank", hullLevel: "Hull Armor", cableLevel: "Elastic Rope", cargoLevel: "Cargo Cage" };
+    return names[randomKey];
+  }, []);
+
+  const handleBuyItem = (item: EquipmentId, cost: number) => {
+    if (money >= cost && !ownedItems.includes(item)) {
+      SoundManager.play('coin');
+      setMoney(prev => prev - cost);
+      setOwnedItems(prev => [...prev, item]);
+      setEquippedItem(item);
+    }
+  };
+
+  const handleEquipItem = (item: EquipmentId) => {
+    SoundManager.play('shop');
+    setEquippedItem(item);
+  };
+
+  const handleRestartFull = () => handleStart();
+
+  const handleBuyRefuel = () => {
+    if (money >= 10) {
+      SoundManager.play('coin');
+      setMoney(m => m - 10);
+      const refs = (window as any).gameRefs;
+      if (refs?.drone) refs.drone.fuel = refs.drone.maxFuel;
+    }
+  };
+
+  const handleBuyRepair = () => {
+    if (money >= 20) {
+      SoundManager.play('coin');
+      setMoney(m => m - 20);
+      const refs = (window as any).gameRefs;
+      if (refs?.drone) refs.drone.health = refs.drone.maxHealth;
+    }
+  };
+
+  const handleLaunchFromShop = () => {
+    SoundManager.play('shop');
+    setGameState(GameState.PLAYING);
+    const refs = (window as any).gameRefs;
+    if (refs?.drone) { refs.drone.vel.y = -3.0; refs.drone.pos.y -= 5.0; }
+  };
+
+  const executeAdminCommand = (e: React.FormEvent) => {
+    e.preventDefault();
+    const rawCmd = adminCommand.toLowerCase().trim();
+    const refs = (window as any).gameRefs;
+    if (rawCmd === 'money') setMoney(m => m + 10000);
+    else if (rawCmd === 'god' && refs?.drone) refs.drone.isGodMode = !refs.drone.isGodMode;
+    else if (rawCmd === 'die') handleCrash('WALL', 0);
+    setAdminCommand('');
+    setShowAdmin(false);
+  };
+
+  return (
+    <div className="relative w-screen h-screen overflow-hidden bg-black select-none touch-none">
+
+      {gameState === GameState.LOADING && (
+        <LoadingScreen progress={loadingProgress} message={loadingMessage} />
+      )}
+
+      {gameState === GameState.MENU && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white z-50 p-4 overflow-y-auto pointer-events-auto">
+          <h1
+            onClick={() => setShowSettings(true)}
+            className="text-6xl font-bold text-pink-400 mb-2 font-vt323 tracking-widest text-center cursor-pointer hover:scale-105 hover:brightness-125 transition-all active:scale-95 group relative"
+          >
+            Neuro's Drone Delivery<br />
+            <span className="text-3xl text-yellow-400">ENDLESS NIGHTMARE</span>
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-pink-500/50 opacity-0 group-hover:opacity-100 transition-opacity tracking-normal font-sans">CLICK FOR SETTINGS (點擊進入設置)</div>
+          </h1>
+
+          <div className="bg-slate-800 p-6 rounded-lg border border-slate-600 mb-6 max-w-md w-full">
+            <div className="text-center mb-6 border-b border-slate-600 pb-4 cursor-pointer hover:bg-slate-700/30 rounded-lg p-2 transition-all active:scale-95 group relative" onClick={() => setShowLeaderboard(true)}>
+              <span className="text-cyan-500 font-bold text-lg tracking-widest group-hover:text-cyan-400">🏆 LONGEST FLIGHT (榜一) 🏆</span>
+              <div className="text-5xl text-white font-mono mt-2">{highScore}m</div>
+              {isMultiplayerHost && mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
+                <div
+                  onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-bounce shadow-lg border border-white cursor-pointer z-[60]"
+                >
+                  {mpManagerRef.current.pendingRequests.length} REQUESTS
+                </div>
+              )}
+            </div>
+
+            {/* Nickname Input moved here */}
+            <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700 mb-4">
+              <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase">Courier Name:</span>
+              <input
+                type="text"
+                placeholder="Enter Nickname"
+                value={playerName}
+                onChange={(e) => setPlayerName(e.target.value.slice(0, 12))}
+                className="flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono"
+              />
+            </div>
+
+            <div className="mt-6 flex flex-col gap-4">
+              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
+                <span className="text-white font-bold">Multiplayer</span>
+                <button
+                  onClick={() => setMultiplayerMode(!multiplayerMode)}
+                  className={`px-4 py-1 rounded font-bold transition-colors ${multiplayerMode ? 'bg-cyan-500 text-white' : 'bg-slate-500 text-gray-300'}`}
+                >
+                  {multiplayerMode ? 'ENABLED (連機中)' : 'DISABLED (離線)'}
+                </button>
+              </div>
+
+              {multiplayerMode && (
+                <div className="flex flex-col gap-2 p-2 bg-slate-900/50 rounded border border-cyan-900">
+                  <div className="flex justify-between items-center h-8">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-cyan-500 font-mono">MY ID: {multiplayerId || 'CONNECTING...'}</span>
+                      {multiplayerId && (
+                        <button
+                          onClick={(e) => {
+                            const id = multiplayerId.replace('NEURO-', '');
+                            // Fallback copy logic
+                            try {
+                              navigator.clipboard.writeText(id).catch(() => {
+                                // Manual fallback
+                                const el = document.createElement('input');
+                                el.value = id;
+                                document.body.appendChild(el);
+                                el.select();
+                                document.execCommand('copy');
+                                document.body.removeChild(el);
+                              });
+                            } catch (err) {
+                              const el = document.createElement('input');
+                              el.value = id;
+                              document.body.appendChild(el);
+                              el.select();
+                              document.execCommand('copy');
+                              document.body.removeChild(el);
+                            }
+                            setVedalMessage("ID Copied!||ID 已複製！");
+                          }}
+                          className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                        >
+                          COPY
+                        </button>
+                      )}
+                    </div>
+                    <button
+                      disabled={!multiplayerId}
+                      onClick={() => {
+                        if (mpManagerRef.current) {
+                          mpManagerRef.current.host();
+                          setIsMultiplayerHost(true);
+                          setVedalMessage("Hosting room. Share your ID!||創建房間成功。分享你的 ID！");
+                          // Initialize local participant list
+                          setRoomParticipants([{ id: mpManagerRef.current.myId || 'HOST', name: playerName }]);
+                        }
+                      }}
+                      className={`text-xs px-3 py-1.5 rounded font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${isMultiplayerHost ? 'bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
+                    >
+                      {isMultiplayerHost ? '● HOSTING' : 'BE HOST'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Enter Room ID (e.g. 5X7B)..."
+                      value={roomToJoin}
+                      onChange={(e) => setRoomToJoin(e.target.value.toUpperCase())}
+                      className="flex-1 bg-slate-800 text-xs p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono"
+                    />
+                    <button
+                      onClick={(e) => {
+                        if (roomToJoin) {
+                          mpManagerRef.current?.join(roomToJoin.startsWith('NEURO-') ? roomToJoin : `NEURO-${roomToJoin}`, playerName);
+                          setIsMultiplayerHost(false);
+                          setWaitingApproval(true);
+                          setJoinApproved(false);
+                        }
+                      }}
+                      className="bg-pink-600 px-4 py-1 text-xs rounded font-bold hover:bg-pink-500 active:scale-95 cursor-pointer text-white"
+                    >
+                      JOIN
+                    </button>
+                  </div>
+                  {/* BROWSE ROOMS BUTTON */}
+                  <button
+                    onClick={() => {
+                      setShowRoomBrowser(true);
+                      MultiplayerManager.getRooms().then(setRoomList);
+                    }}
+                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs py-1 rounded font-bold mt-1"
+                  >
+                    BROWSE ROOMS (瀏覽房間)
+                  </button>
+                </div>
+              )}
+
+
+              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
+                <span className="text-white font-bold">Mode</span>
+                <button onClick={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')} className={`px-4 py-1 rounded font-bold transition-colors ${difficulty === 'EASY' ? 'bg-green-500 text-white' : 'bg-slate-500 text-gray-300'}`}>
+                  {difficulty === 'EASY' ? 'EASY (MOUSE/JOY)' : 'NORMAL (WASD)'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
+                <span className="text-white font-bold">Mobile Controls</span>
+                <button onClick={() => setIsMobileMode(!isMobileMode)} className={`w-16 h-8 rounded-full transition-colors relative border-2 border-slate-700 ${isMobileMode ? 'bg-pink-500' : 'bg-slate-700'}`}>
+                  <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
+            {multiplayerMode && !isMultiplayerHost && waitingApproval ? (
+              <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-yellow-500 animate-pulse text-yellow-400 font-bold tracking-widest">
+                WAITING FOR HOST APPROVAL... (等待房主批准...)
+              </div>
+            ) : multiplayerMode && !isMultiplayerHost && !joinApproved ? (
+              <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-cyan-500 text-cyan-400 font-bold tracking-widest">
+                JOIN A ROOM TO PLAY (請加入房間後開始)
+              </div>
+            ) : (
+              <>
+                {joinApproved && !isMultiplayerHost && (
+                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-green-400 font-bold animate-bounce whitespace-nowrap">
+                    ✓ APPROVED! SELECT YOUR DRONE
+                  </div>
+                )}
+                <button
+                  onClick={() => { setPersona(Persona.NEURO); handleStart(); }}
+                  className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                  disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
+                >
+                  PLAY AS NEURO
+                </button>
+                <button
+                  onClick={() => { setPersona(Persona.EVIL); handleStart(); }}
+                  className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                  disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
+                >
+                  PLAY AS EVIL
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )
+      }
+
+      {
+        showLeaderboard && (
+          <div className="absolute inset-0 z-[100] flex items-center justify-center p-4 sm:p-20 pointer-events-auto">
+            <Leaderboard entries={leaderboard} onClose={() => setShowLeaderboard(false)} onChallengeSeed={(seed) => { setShowLeaderboard(false); handleStart(seed); }} />
+          </div>
+        )
+      }
+
+      {/* Room Browser Overlay */}
+      {
+        showRoomBrowser && (
+          <div className="absolute inset-0 z-[150] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-800 border-4 border-purple-500 p-6 rounded-lg max-w-lg w-full max-h-[80vh] flex flex-col">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold text-purple-400">PUBLIC ROOMS</h2>
+                <button onClick={() => setShowRoomBrowser(false)} className="bg-red-600 px-3 py-1 rounded text-white font-bold">X</button>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2">
+                {roomList.length === 0 ? (
+                  <div className="text-center text-gray-500 py-8">NO ROOMS FOUND...</div>
+                ) : (
+                  roomList.map(room => (
+                    <div key={room.id} className="bg-slate-700 p-3 rounded flex justify-between items-center">
+                      <div>
+                        <div className="font-bold text-cyan-300">ROOM {room.id.slice(-4)}</div>
+                        <div className="text-xs text-gray-400">Players: {room.players} | Seed: {room.seed}</div>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setRoomToJoin(room.id);
+                          setShowRoomBrowser(false);
+                          mpManagerRef.current?.join(room.id);
+                          setIsMultiplayerHost(false);
+                          setWaitingApproval(true);
+                          setJoinApproved(false);
+                        }}
+                        className="bg-green-600 hover:bg-green-500 px-3 py-1 rounded text-white font-bold text-sm"
+                      >
+                        JOIN
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => MultiplayerManager.getRooms().then(setRoomList)}
+                  className="text-purple-400 underline text-sm"
+                >
+                  Refresh List
+                </button>
+              </div>
+            </div>
+          </div >
+        )
+      }
+
+      {/* Lobby Waiting Screen */}
+      {
+        gameState === GameState.WAITING_LOBBY && (
+          <div className="absolute inset-0 z-[300] flex flex-col items-center justify-center bg-slate-900/95 backdrop-blur-md text-white pointer-events-auto">
+            <div
+              onClick={() => setShowSettings(true)}
+              className="group relative flex flex-col items-center cursor-pointer mb-8 transition-all hover:scale-105 active:scale-95"
+              title="Click to change Avatar / Settings (點擊更換頭像/設定)"
+            >
+              <div className="transform scale-150 border-4 border-transparent group-hover:border-cyan-500/30 rounded-full transition-all duration-300">
+                <NeuroFace status="idle" persona={persona} />
+              </div>
+              <div className="absolute -bottom-10 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-900/90 text-cyan-400 text-[10px] px-2 py-1 rounded border border-cyan-500 font-bold tracking-widest whitespace-nowrap z-10 pointer-events-none">
+                CLICK TO CHANGE AVATAR / SETTINGS
+              </div>
+            </div>
+
+            {isMultiplayerHost ? (
+              <div className="flex flex-col items-center gap-6 w-full max-w-md">
+                <h2 className="text-5xl font-bold text-green-400 animate-pulse font-vt323 tracking-widest mb-2">LOBBY (已就緒)</h2>
+
+                <div className="w-full bg-slate-800/80 p-5 rounded-xl border-2 border-slate-700 shadow-xl">
+                  <h3 className="text-cyan-400 font-bold border-b-2 border-slate-700 pb-3 mb-4 tracking-widest text-center uppercase">
+                    READY PARTICIPANTS ({roomParticipants.length})
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
+                    {roomParticipants.length > 0 ? (
+                      roomParticipants.map((p) => (
+                        <div key={p.id} className="flex flex-col bg-slate-900/80 border border-slate-700 p-3 rounded-lg relative overflow-hidden group">
+                          <div className={`absolute top-0 left-0 w-1 h-full ${p.id === multiplayerId ? 'bg-cyan-500' : 'bg-green-500'} opacity-50`}></div>
+                          <span className="text-white font-bold text-sm truncate">{p.name}</span>
+                          <span className="text-[9px] text-slate-500 font-mono mt-1">ID: {p.id.slice(-6)}</span>
+                          {p.id === multiplayerId && <span className="absolute top-1 right-1 text-[8px] bg-cyan-900/80 text-cyan-400 px-1 rounded border border-cyan-800 font-bold">YOU</span>}
+                        </div>
+                      ))
+                    ) : (
+                      <div className="col-span-2 text-center text-slate-500 py-4 italic">Waiting for room sync...</div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => {
+                    console.log("[LOBBY] Start button clicked");
+                    if (mpManagerRef.current) {
+                      console.log("[LOBBY] Broadcasting start");
+                      // Send to clients
+                      mpManagerRef.current.broadcast({ type: 'GAME_START' });
+                      // Trigger locally
+                      handleMultiplayerEvent({ type: 'DATA', id: 'SYSTEM', data: { type: 'GAME_START' } });
+                    } else {
+                      console.error("[LOBBY] mpManagerRef is null");
+                    }
+                  }}
+                  className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.6)] text-2xl tracking-widest animate-pulse cursor-pointer relative z-[310]"
+                >
+                  START GAME (開始)
+                </button>
+
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  ⚙️ SETTINGS (系統設定)
+                </button>
+
+                {mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="w-full bg-yellow-600/80 hover:bg-yellow-500 text-black font-bold py-2 rounded border-2 border-yellow-400 animate-pulse flex items-center justify-center gap-2"
+                  >
+                    ⚠️ {mpManagerRef.current.pendingRequests.length} PENDING REQUESTS
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-6 w-full max-w-sm">
+                <div className="flex flex-col items-center gap-4">
+                  <h2 className="text-5xl font-bold text-cyan-400 animate-pulse font-vt323 tracking-widest mb-4">WAITING FOR HOST...</h2>
+                  <div className="bg-slate-800 p-6 rounded-lg border-2 border-slate-600 text-center w-full">
+                    <p className="text-slate-400 text-sm uppercase tracking-widest mb-2">CURRENT SECTOR</p>
+                    <p className="text-2xl font-mono font-bold text-white mb-4">{currentSeed}</p>
+                    <div className="flex gap-2 justify-center">
+                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
+                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setShowSettings(true)}
+                  className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  ⚙️ SETTINGS (系統設定)
+                </button>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      {
+        pendingScore && (
+          <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-md pointer-events-auto p-4">
+            <div className={`bg-slate-800 border-4 border-cyan-500 p-8 rounded-xl shadow-2xl max-w-sm w-full animate-bounce-short`}>
+              <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ NEW RECORD ⭐</h2>
+              <input autoFocus type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value.slice(0, 12))} placeholder="Name..." className="w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold mb-4 outline-none focus:border-cyan-500" />
+              <div className="flex gap-2">
+                <button onClick={() => saveToLeaderboard(playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">SAVE</button>
+                <button onClick={() => {
+                  setPendingScore(null);
+                  if (postScoreAction === 'RESTART') handleRestartFull();
+                  else if (postScoreAction === 'MENU') {
+                    setShowSettings(false);
+                    setGameState(GameState.MENU);
+                  }
+                }} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-4 rounded">SKIP</button>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        gameState === GameState.CHECKPOINT_SHOP && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto">
+            <div className="bg-slate-800 border-4 border-green-500 p-8 rounded-lg text-center shadow-2xl">
+              <h2 className="text-4xl font-bold text-green-400 mb-2">CHECKPOINT</h2>
+              <div className="flex flex-wrap justify-center gap-4 mb-8">
+                <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">FUEL $10</button>
+                <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">FIX $20</button>
+                <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">UPGRADE</button>
+              </div>
+              <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl">LAUNCH</button>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        gameState === GameState.GAME_OVER && !isSpectating && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white z-50 backdrop-blur-sm pointer-events-auto">
+            <div className="mb-6 transform scale-150 cursor-pointer hover:brightness-125 active:scale-140 transition-all" onClick={() => setShowSettings(true)}>
+              <NeuroFace status="dead" persona={persona} />
+              <div className="absolute -bottom-4 right-0 bg-cyan-600 text-[10px] px-1 rounded border border-cyan-400 font-bold opacity-0 hover:opacity-100 transition-opacity">SETTINGS</div>
+            </div>
+            <h1 className="text-6xl text-red-500 font-bold mb-2 tracking-widest">WASTED</h1>
+            <div className="text-center mb-6">
+              <h2 className="text-2xl font-bold text-red-400 mb-1">
+                {deathDetails.reasonDisplay}
+              </h2>
+              <div className="text-xl font-bold text-slate-300 flex items-center justify-center gap-4">
+                <span>DISTANCE: <span className="text-white">{finalDistance}m</span></span>
+                <span className="text-cyan-400 border-l border-slate-600 pl-4">
+                  RANK: #{leaderboard.filter(e => e.distance > finalDistance).length + 1}
+                </span>
+              </div>
+              <p className="text-slate-400 mt-1">TIME: {Math.floor(gameTime)}s</p>
+              <p className="text-xl text-yellow-500 font-vt323 tracking-wider italic mt-2">
+                {deathDetails.taunt.split('||')[1] || deathDetails.taunt.split('||')[0]}
+              </p>
+            </div>
+            <div className="mt-8 flex flex-wrap justify-center gap-6">
+              {!multiplayerMode ? (
+                <>
+                  <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">RESPAWN (繼續)</button>
+                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore({ distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">RESTART (重開)</button>
+                </>
+              ) : (
+                <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">SPECTATE (觀戰)</button>
+              )}
+              <button onClick={handleBackToMenu} className="py-3 px-8 text-gray-400 underline">Menu</button>
+            </div>
+          </div>
+        )
+      }
+
+      {/* Multiplayer Room Leaderboard - All Players Dead */}
+      {
+        multiplayerMode && allPlayersDead && (
+          <div className="absolute inset-0 z-[250] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md text-white pointer-events-auto">
+            <div className="bg-slate-800 border-4 border-red-500 p-8 rounded-xl max-w-2xl w-full shadow-2xl">
+              <h1 className="text-5xl font-bold text-red-400 mb-6 text-center tracking-widest font-vt323">GAME OVER</h1>
+
+              <div className="bg-slate-900 p-6 rounded-lg mb-6">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4 border-b border-slate-600 pb-2">ROOM LEADERBOARD</h2>
+                <div className="space-y-2">
+                  {roomLeaderboard
+                    .sort((a, b) => b.distance - a.distance)
+                    .map((player, index) => (
+                      <div
+                        key={player.id}
+                        className={`flex items-center justify-between p-3 rounded ${player.id === (multiplayerId || 'ME')
+                          ? 'bg-cyan-900/50 border-2 border-cyan-500'
+                          : 'bg-slate-800'
+                          }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`text-2xl font-bold ${index === 0 ? 'text-yellow-400' :
+                            index === 1 ? 'text-gray-300' :
+                              index === 2 ? 'text-orange-600' : 'text-slate-400'
+                            }`}>
+                            #{index + 1}
+                          </span>
+                          <div>
+                            <div className="font-bold text-white">
+                              {player.id === (multiplayerId || 'ME') ? 'YOU' : player.id.slice(-4)}
+                            </div>
+                            <div className="text-xs text-slate-400">{player.persona}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xl font-bold text-white">{player.distance}m</div>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {isMultiplayerHost ? (
+                  <>
+                    <button
+                      onClick={() => {
+                        // Generate new seed for fresh game
+                        const newSeed = Math.random().toString(36).substring(2, 9).toUpperCase();
+                        setCurrentSeed(newSeed);
+                        setGameKey(k => k + 1);
+
+                        if (mpManagerRef.current) {
+                          // Broadcast restart with new seed
+                          mpManagerRef.current.broadcast({ type: 'GAME_RESTART' });
+                          mpManagerRef.current.broadcast({ type: 'SYNC_SEED', seed: newSeed });
+                        }
+                        setAllPlayersDead(false);
+                        setRoomLeaderboard([]);
+                        setGameState(GameState.WAITING_LOBBY);
+                      }}
+                      className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl tracking-widest shadow-lg"
+                    >
+                      RESTART GAME (重新開始)
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAllPlayersDead(false);
+                        setRoomLeaderboard([]);
+                        setMultiplayerMode(false);
+                        setGameState(GameState.MENU);
+                      }}
+                      className="w-full bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-lg"
+                    >
+                      EXIT TO MENU (退出)
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div className="bg-yellow-900/30 border-2 border-yellow-500 p-4 rounded-lg text-center">
+                      <p className="text-yellow-400 font-bold text-lg animate-pulse">WAITING FOR HOST TO RESTART...</p>
+                      <p className="text-slate-400 text-sm mt-1">等待房主重新開始...</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setAllPlayersDead(false);
+                        setRoomLeaderboard([]);
+                        setMultiplayerMode(false);
+                        setGameState(GameState.MENU);
+                      }}
+                      className="w-full bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-lg"
+                    >
+                      EXIT TO MENU (退出)
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        isSpectating && (
+          <div className="absolute top-4 right-4 z-[200] pointer-events-auto">
+            <button onClick={() => setIsSpectating(false)} className="bg-red-600 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-white hover:scale-105 transition-transform">EXIT SPECTATE</button>
+          </div>
+        )
+      }
+
+      {
+        gameState === GameState.SHOP && (
+          <div className="pointer-events-auto absolute inset-0 z-50">
+            <Shop money={money} upgrades={upgrades} buyUpgrade={handleBuyUpgrade} onNextLevel={() => setGameState(GameState.CHECKPOINT_SHOP)} ownedItems={ownedItems} equippedItem={equippedItem} buyItem={handleBuyItem} equipItem={handleEquipItem} />
+          </div>
+        )
+      }
+
+      <GameCanvas
+        key={gameKey}
+        gameState={gameState}
+        setGameState={setGameState}
+        persona={persona}
+        setPersona={setPersona}
+        difficulty={difficulty}
+        isMobileMode={isMobileMode}
+        upgrades={upgrades}
+        controls={controlsConfig}
+        equippedItem={equippedItem}
+        addMoney={(amt) => setMoney(prev => prev + amt)}
+        onCrash={handleCrash}
+        setFaceStatus={setFaceStatus}
+        setVedalMessage={setVedalMessage}
+        setStats={(hp, fuel, cargoHp, distance, distToNext) => setDisplayStats({ hp, fuel, cargoHp, distance, distToNext })}
+        lastCheckpoint={lastCheckpoint}
+        setLastCheckpoint={setLastCheckpoint}
+        respawnToken={respawnToken}
+        onGrantRandomUpgrade={handleRandomUpgrade}
+        setUrgentOrderProgress={setUrgentOrderProgress}
+        onUpdateTrajectory={(traj, cargoTraj) => {
+          setCurrentTrajectory(traj);
+          if (cargoTraj) setCurrentCargoTrajectory(cargoTraj);
+        }}
+        seed={currentSeed}
+        ghostData={ghostData}
+        isLayoutEditing={isLayoutEditing}
+        multiplayer={{
+          isActive: multiplayerMode,
+          manager: mpManagerRef.current,
+          remotePlayers
+        }}
+      />
+
+      <SettingsOverlay
+        isOpen={showSettings}
+        gameState={gameState}
+        controls={controlsConfig}
+        onUpdateControls={setControlsConfig}
+        onResume={() => {
+          if (gameState === GameState.PAUSED) setGameState(GameState.PLAYING);
+          setShowSettings(false);
+        }}
+        onQuit={() => { setShowSettings(false); setGameState(GameState.MENU); }}
+        onDifficultyToggle={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')}
+        difficulty={difficulty}
+        onStartLayoutEdit={() => setIsLayoutEditing(true)}
+        multiplayer={{
+          isActive: !!multiplayerMode,
+          isHost: isMultiplayerHost,
+          manager: mpManagerRef.current,
+          players: remotePlayers,
+          autoJoin: autoJoin,
+          onToggleAutoJoin: () => {
+            const newVal = !autoJoin;
+            setAutoJoin(newVal);
+            if (mpManagerRef.current) mpManagerRef.current.autoJoin = newVal;
+          }
+        }}
+        currentSeed={currentSeed}
+        onUpdateSeed={(seed) => {
+          if (mpManagerRef.current && isMultiplayerHost) {
+            mpManagerRef.current.broadcast({ type: 'SYNC_SEED', seed });
+            setCurrentSeed(seed);
+            setGameState(GameState.MENU);
+          }
+        }}
+        playerName={playerName}
+        onUpdateName={setPlayerName}
+        roomParticipants={roomParticipants}
+        persona={persona}
+        onUpdatePersona={setPersona}
+      />
+
+      {
+        (isLayoutEditing && isMobileMode) && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-[300] bg-pink-600 text-white px-6 py-2 rounded-full font-bold shadow-lg animate-bounce pointer-events-auto cursor-pointer" onClick={() => setIsLayoutEditing(false)}>
+            DONE EDITING (完成調整)
+          </div>
+        )
+      }
+
+      {
+        (gameState === GameState.PLAYING || gameState === GameState.CHECKPOINT_SHOP || gameState === GameState.PAUSED || isLayoutEditing) && (
+          <>
+            <UIOverlay
+              stats={{ ...displayStats, money }}
+              gameTime={gameTime}
+              faceStatus={faceStatus}
+              persona={persona}
+              vedalMessage={vedalMessage}
+              isMobile={isMobileMode}
+              urgentOrderProgress={urgentOrderProgress}
+              onAvatarClick={togglePause}
+              isFullscreen={isFullscreen}
+            />
+            {isMobileMode && (
+              <MobileControls
+                difficulty={difficulty}
+                layout={controlsConfig.mobile}
+                isEditing={isLayoutEditing}
+                onUpdateLayout={(newLayout) => setControlsConfig(prev => ({ ...prev, mobile: newLayout }))}
+              />
+            )}
+          </>
+        )
+      }
+
+      {
+        showAdmin && (
+          <div className="absolute top-0 left-0 w-full bg-black/80 p-2 z-[100] border-b-2 border-green-500 font-mono pointer-events-auto">
+            <form onSubmit={executeAdminCommand} className="flex gap-2">
+              <span className="text-green-500 font-bold">{'>'}</span>
+              <input ref={adminInputRef} type="text" value={adminCommand} onChange={(e) => setAdminCommand(e.target.value)} className="bg-transparent border-none outline-none text-green-400 w-full font-bold" />
+            </form>
+          </div>
+        )
+      }
+    </div >
+  );
+};
+
+export default App;
