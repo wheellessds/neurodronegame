@@ -1681,7 +1681,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
                     // Throttle UI updates to ~10fps to save performance
                     statsThrottleTimer += dt;
-                    if (statsThrottleTimer >= 6) {
+                    if (statsThrottleTimer >= 0.1) {
                         setStats(hpPct, fuelPct, cargoPct, scaledDistance, distToNext, levelRef.current.train.x);
                         statsThrottleTimer = 0;
                     }
@@ -1689,7 +1689,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // --- Multiplayer Sync ---
                     if (multiplayer?.isActive && multiplayer.manager) {
                         mpSyncTimerRef.current += dt;
-                        if (mpSyncTimerRef.current >= 3) { // Sync ~20 times per second
+                        if (mpSyncTimerRef.current >= 0.05) { // Sync ~20 times per second
                             multiplayer.manager.broadcast({
                                 type: 'PLAYER_STATE',
                                 pos: drone.pos,
@@ -1698,7 +1698,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 persona,
                                 cargoPos: cargo.pos,
                                 cargoAngle: cargo.angle,
-                                thrustPower: drone.thrustPower
+                                thrustPower: drone.thrustPower,
+                                // [SPECTATOR SYNC] Broadcast UI stats
+                                fuel: fuelPct,
+                                hpPercent: hpPct,
+                                cargoHealth: cargoPct,
+                                scoreDistance: scaledDistance,
+                                distToNext
                             });
                             mpSyncTimerRef.current = 0;
                         }

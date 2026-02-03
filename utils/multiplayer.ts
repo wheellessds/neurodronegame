@@ -10,6 +10,12 @@ export interface RemotePlayer {
     cargoPos?: { x: number, y: number };
     cargoAngle?: number;
     thrustPower?: number;
+    // [SPECTATOR SYNC] Added stats for UI
+    fuel?: number;
+    hpPercent?: number; // Added for correct UI bar display
+    cargoHealth?: number;
+    scoreDistance?: number;
+    distToNext?: number;
     lastUpdate: number;
 }
 

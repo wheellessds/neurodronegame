@@ -242,6 +242,12 @@ const App: React.FC = () => {
             cargoPos: event.data.cargoPos,
             cargoAngle: event.data.cargoAngle,
             thrustPower: event.data.thrustPower,
+            // [SPECTATOR SYNC] Store UI stats
+            fuel: event.data.fuel,
+            hpPercent: event.data.hpPercent,
+            cargoHealth: event.data.cargoHealth,
+            scoreDistance: event.data.scoreDistance,
+            distToNext: event.data.distToNext,
             lastUpdate: Date.now()
           });
           return next;
@@ -1576,7 +1582,14 @@ const App: React.FC = () => {
         (gameState === GameState.PLAYING || gameState === GameState.CHECKPOINT_SHOP || gameState === GameState.PAUSED || isLayoutEditing) && (
           <>
             <UIOverlay
-              stats={{ ...displayStats, money }}
+              stats={(isSpectating && spectatorTargetId && remotePlayers.get(spectatorTargetId)) ? {
+                hp: remotePlayers.get(spectatorTargetId)!.hpPercent ?? 100,
+                fuel: remotePlayers.get(spectatorTargetId)!.fuel ?? 100,
+                cargoHp: remotePlayers.get(spectatorTargetId)!.cargoHealth ?? 100,
+                money: money,
+                distance: remotePlayers.get(spectatorTargetId)!.scoreDistance ?? 0,
+                distToNext: remotePlayers.get(spectatorTargetId)!.distToNext ?? 0
+              } : { ...displayStats, money }}
               gameTime={gameTime}
               faceStatus={faceStatus}
               persona={persona}
@@ -1611,7 +1624,7 @@ const App: React.FC = () => {
 
       {/* Version Tag */}
       <div className="absolute bottom-1 left-2 z-[1000] text-[8px] font-mono text-white/20 select-none pointer-events-none tracking-widest uppercase">
-        Ver. Alpha 1.1 - Spectator Sync Fix
+        Ver. Alpha 1.2 - UI Sync Fix
       </div>
     </div >
   );
