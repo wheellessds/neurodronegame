@@ -13,6 +13,7 @@ import { SettingsOverlay } from './components/SettingsOverlay';
 import { LoadingScreen } from './components/LoadingScreen';
 import { preloadAssets } from './utils/assetLoader';
 import { MultiplayerManager, RemotePlayer, MultiplayerEvent } from './utils/multiplayer';
+import { InfoTooltip } from './components/InfoTooltip';
 
 // Assets to preload
 import neuroIdle from './assets/face/neuro_idle.gif';
@@ -504,9 +505,8 @@ const App: React.FC = () => {
 
     // [MULTIPLAYER FIX] In multiplayer, do NOT remount GameCanvas (change key) on respawn.
     // This preserves the train instance and state.
-    if (!multiplayerMode) {
-      setGameKey(k => k + 1); // Force map regeneration only in single player
-    }
+    // [FIX] In Single Player, we also don't want to remount if we want to preserve the ghost trajectory correctly.
+    // setGameKey(k => k + 1); // Removed to prevent remounting and state loss
 
     setRespawnToken(t => t + 1);
     setGameState(GameState.PLAYING);
@@ -701,7 +701,10 @@ const App: React.FC = () => {
 
             {/* Nickname Input moved here */}
             <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700 mb-4">
-              <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase">Courier Name:</span>
+              <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase flex items-center">
+                Courier Name:
+                <InfoTooltip text="輸入您的外送員代號，這將顯示在排行榜與房間名單中。" />
+              </span>
               <input
                 type="text"
                 placeholder="Enter Nickname"
@@ -713,7 +716,10 @@ const App: React.FC = () => {
 
             <div className="mt-6 flex flex-col gap-4">
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold">Multiplayer</span>
+                <span className="text-white font-bold flex items-center">
+                  Multiplayer
+                  <InfoTooltip text="開啟後可與線上其他外送員競爭或觀戰；關閉則進入純單機作業。" />
+                </span>
                 <button
                   onClick={() => setMultiplayerMode(!multiplayerMode)}
                   className={`px-4 py-1 rounded font-bold transition-colors ${multiplayerMode ? 'bg-cyan-500 text-white' : 'bg-slate-500 text-gray-300'}`}
@@ -773,6 +779,7 @@ const App: React.FC = () => {
                     >
                       {isMultiplayerHost ? '● HOSTING' : 'BE HOST'}
                     </button>
+                    <InfoTooltip text="創建一個新的配送房間，並獲得一個專屬 ID 分享給好友。" />
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -791,9 +798,10 @@ const App: React.FC = () => {
                           setJoinApproved(false);
                         }
                       }}
-                      className="bg-pink-600 px-4 py-1 text-xs rounded font-bold hover:bg-pink-500 active:scale-95 cursor-pointer text-white"
+                      className="bg-pink-600 px-4 py-1 text-xs rounded font-bold hover:bg-pink-500 active:scale-95 cursor-pointer text-white flex items-center gap-1"
                     >
                       JOIN
+                      <InfoTooltip text="輸入好友的房間 ID 並請求加入其配送任務。" position="right" />
                     </button>
                   </div>
                   {/* BROWSE ROOMS BUTTON */}
@@ -802,23 +810,30 @@ const App: React.FC = () => {
                       setShowRoomBrowser(true);
                       MultiplayerManager.getRooms().then(setRoomList);
                     }}
-                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs py-1 rounded font-bold mt-1"
+                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs py-1 rounded font-bold mt-1 flex items-center justify-center gap-1"
                   >
                     BROWSE ROOMS (瀏覽房間)
+                    <InfoTooltip text="啟動區域掃描，尋找當前所有可加入的公開配送房間。" />
                   </button>
                 </div>
               )}
 
 
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold">Mode</span>
+                <span className="text-white font-bold flex items-center">
+                  Mode
+                  <InfoTooltip text="切換操作模式。簡單模式有無人機自動找正；普通模式為全物理手動控制。" />
+                </span>
                 <button onClick={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')} className={`px-4 py-1 rounded font-bold transition-colors ${difficulty === 'EASY' ? 'bg-green-500 text-white' : 'bg-slate-500 text-gray-300'}`}>
                   {difficulty === 'EASY' ? 'EASY (MOUSE/JOY)' : 'NORMAL (WASD)'}
                 </button>
               </div>
 
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold">Mobile Controls</span>
+                <span className="text-white font-bold flex items-center">
+                  Mobile Controls
+                  <InfoTooltip text="為觸控螢幕優化介面，開啟後會顯示虛擬搖桿與按鍵。" />
+                </span>
                 <button onClick={() => setIsMobileMode(!isMobileMode)} className={`w-16 h-8 rounded-full transition-colors relative border-2 border-slate-700 ${isMobileMode ? 'bg-pink-500' : 'bg-slate-700'}`}>
                   <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
                 </button>
@@ -844,17 +859,19 @@ const App: React.FC = () => {
                 )}
                 <button
                   onClick={() => { setPersona(Persona.NEURO); handleStart(); }}
-                  className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                  className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                   disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                 >
                   PLAY AS NEURO
+                  <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" />
                 </button>
                 <button
                   onClick={() => { setPersona(Persona.EVIL); handleStart(); }}
-                  className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                  className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                   disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                 >
                   PLAY AS EVIL
+                  <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" />
                 </button>
               </>
             )}
@@ -1050,11 +1067,23 @@ const App: React.FC = () => {
             <div className="bg-slate-800 border-4 border-green-500 p-8 rounded-lg text-center shadow-2xl">
               <h2 className="text-4xl font-bold text-green-400 mb-2">CHECKPOINT</h2>
               <div className="flex flex-wrap justify-center gap-4 mb-8">
-                <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">FUEL $10</button>
-                <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">FIX $20</button>
-                <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">UPGRADE</button>
+                <div className="relative group flex items-center">
+                  <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">FUEL $10</button>
+                  <InfoTooltip text="緊急補充全部燃料。燃料耗盡將導致配送失敗。" position="bottom" />
+                </div>
+                <div className="relative group flex items-center">
+                  <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">FIX $20</button>
+                  <InfoTooltip text="修復無人機機身損害。血量歸零將導致配送失敗。" position="bottom" />
+                </div>
+                <div className="relative group flex items-center">
+                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">UPGRADE</button>
+                  <InfoTooltip text="前往科學家 Vedal 的工作坊，升級硬體或購買特殊裝備。" position="bottom" />
+                </div>
               </div>
-              <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl">LAUNCH</button>
+              <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl flex items-center gap-2">
+                LAUNCH
+                <InfoTooltip text="完成補給，即刻出發！" />
+              </button>
             </div>
           </div>
         )

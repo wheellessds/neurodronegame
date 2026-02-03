@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { GameState, ControlsConfig, Persona } from '../types';
 import { MultiplayerManager, RemotePlayer } from '../utils/multiplayer';
+import { InfoTooltip } from './InfoTooltip';
 
 interface SettingsOverlayProps {
     isOpen: boolean;
@@ -99,7 +100,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                 <div className="flex-1 overflow-y-auto p-6 space-y-6">
                     {activeTab === 'general' && (
                         <div className="space-y-4">
-                            <SettingItem label="PLAYER NAME (暱稱)">
+                            <SettingItem label="PLAYER NAME (暱稱)" info="設定在排行榜和多人模式中顯示的名稱。">
                                 <input
                                     type="text"
                                     value={playerName || ''}
@@ -107,7 +108,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     className="bg-black/50 border border-cyan-500 rounded px-2 py-1 text-yellow-400 font-bold w-32 outline-none focus:ring-1 focus:ring-cyan-500"
                                 />
                             </SettingItem>
-                            <SettingItem label="DIFFICULTY (難度)">
+                            <SettingItem label="DIFFICULTY (難度)" info="切換操作模式。普通模式全手動；簡單模式有無人機自動找正功能。">
                                 <button
                                     onClick={onDifficultyToggle}
                                     className="bg-slate-800 border-2 border-cyan-500 px-4 py-1 text-yellow-400 font-bold hover:bg-slate-700 transition-colors rounded"
@@ -115,7 +116,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     {difficulty}
                                 </button>
                             </SettingItem>
-                            <SettingItem label="AVATAR (頭像)">
+                            <SettingItem label="AVATAR (頭像)" info="Neuro 有隨機性能延遲；Evil Neuro 推力強大但燃料消耗更快。">
                                 <div className="flex gap-2">
                                     <button
                                         onClick={() => onUpdatePersona(Persona.NEURO)}
@@ -131,13 +132,17 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     </button>
                                 </div>
                             </SettingItem>
-                            <div className="pt-4 border-t border-slate-800">
+                            <div className="pt-4 border-t border-slate-800 text-center">
                                 <button
                                     onClick={onQuit}
-                                    className="w-full bg-red-900/40 hover:bg-red-900/60 border-2 border-red-700 text-red-100 py-3 rounded-xl font-bold transition-all active:scale-95"
+                                    className="w-full bg-red-900/40 hover:bg-red-900/60 border-2 border-red-700 text-red-100 py-3 rounded-xl font-bold transition-all active:scale-95 mb-2"
                                 >
                                     QUIT TO MENU (回到選單)
                                 </button>
+                                <div className="flex items-center justify-center gap-1 text-slate-500 text-xs">
+                                    <span>回主畫面</span>
+                                    <InfoTooltip text="放棄當前任務並回到主選單。未存檔的積分將會消失。" />
+                                </div>
                             </div>
                         </div>
                     )}
@@ -174,7 +179,10 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
 
                     {activeTab === 'mobile' && (
                         <div className="space-y-4 text-center">
-                            <p className="text-gray-400 text-sm">Customize touch button positions by dragging. (透過拖拽自定義按鍵位置)</p>
+                            <p className="text-gray-400 text-sm flex items-center justify-center gap-1">
+                                Customize touch button positions by dragging. (透過拖拽自定義按鍵位置)
+                                <InfoTooltip text="進入按鍵位置調整模式，在此模式下遊戲會暫停。" />
+                            </p>
                             <button
                                 onClick={() => { onStartLayoutEdit(); onResume(); }}
                                 className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold py-4 rounded-xl shadow-lg border-2 border-pink-400 border-dashed animate-pulse"
@@ -195,7 +203,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
 
 
                                     {/* Auto Join Toggle */}
-                                    <SettingItem label="AUTO JOIN (自動加入)">
+                                    <SettingItem label="AUTO JOIN (自動加入)" info="開啟後，系統將自動請求加入最近的公開房間。">
                                         <button
                                             onClick={() => multiplayer.onToggleAutoJoin?.()}
                                             className={`px-3 py-1 rounded font-bold ${multiplayer.autoJoin ? 'bg-green-600 text-white' : 'bg-red-900 text-gray-400'}`}
@@ -206,8 +214,11 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
 
                                     {/* Seed Control */}
                                     <div className="flex flex-col gap-2 bg-slate-800/30 p-3 rounded-lg border border-slate-700">
-                                        <div className="flex justify-between">
-                                            <span className="text-white font-bold">WORLD SEED</span>
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-white font-bold flex items-center">
+                                                WORLD SEED
+                                                <InfoTooltip text="輸入特定的種子代碼，可生成固定的隧道地形與朋友比賽。" />
+                                            </span>
                                             <button
                                                 onClick={() => {
                                                     if (onUpdateSeed) onUpdateSeed(localSeed);
@@ -304,9 +315,12 @@ const TabButton: React.FC<{ active: boolean; onClick: () => void; label: string 
     </button>
 );
 
-const SettingItem: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+const SettingItem: React.FC<{ label: string; children: React.ReactNode; info?: string }> = ({ label, children, info }) => (
     <div className="flex justify-between items-center bg-slate-800/30 p-3 rounded-lg border border-slate-700">
-        <span className="text-white font-bold text-lg">{label}</span>
+        <span className="text-white font-bold text-lg flex items-center">
+            {label}
+            {info && <InfoTooltip text={info} />}
+        </span>
         {children}
     </div>
 );

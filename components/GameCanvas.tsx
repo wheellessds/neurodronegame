@@ -101,6 +101,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const cargoTrajectoryRef = useRef<{ x: number, y: number }[]>([]);
     const trajectoryTimerRef = useRef(0);
     const frameCounterRef = useRef(0);
+    const trajectoryCheckpointLengthRef = useRef(0);
+    const cargoTrajectoryCheckpointLengthRef = useRef(0);
 
     // Game Entities Refs
     const droneRef = useRef<Drone>({
@@ -364,7 +366,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Reset order on death/reset
         activeOrderRef.current = { active: false, timeLeft: 0, maxTime: 0 };
         setUrgentOrderProgress(null);
-        trajectoryRef.current = [];
+
+        // [FIX] Rewind trajectory instead of clearing it entirely
+        trajectoryRef.current = trajectoryRef.current.slice(0, trajectoryCheckpointLengthRef.current);
+        cargoTrajectoryRef.current = cargoTrajectoryRef.current.slice(0, cargoTrajectoryCheckpointLengthRef.current);
         trajectoryTimerRef.current = 0;
 
         // Reset Death Debris
@@ -483,6 +488,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         nextGenX.current = genX;
 
         nextCheckpointX.current = Math.max(nextCheckpointX.current, lastCheckpoint.x + Constants.CHECKPOINT_INTERVAL);
+
+        trajectoryCheckpointLengthRef.current = 0;
+        cargoTrajectoryCheckpointLengthRef.current = 0;
+        trajectoryRef.current = [];
+        cargoTrajectoryRef.current = [];
 
         resetDroneState();
         maxDistanceRef.current = lastCheckpoint.x;
@@ -1312,6 +1322,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                             entity.pos.y = wall.y - entity.radius;
                                             fuelEmptyFramesRef.current = 0;
                                             if (cargoRef.current.connected) cargoRef.current.vel = { x: 0, y: 0 };
+
+                                            // [FIX] Record trajectory lengths at the Moment of checkpoint reach
+                                            trajectoryCheckpointLengthRef.current = trajectoryRef.current.length;
+                                            cargoTrajectoryCheckpointLengthRef.current = cargoTrajectoryRef.current.length;
+
                                             return;
                                         }
                                     }

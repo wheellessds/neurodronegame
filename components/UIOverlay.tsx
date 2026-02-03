@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { NeuroFace } from './NeuroFace';
 import { Persona } from '../types';
+import { InfoTooltip } from './InfoTooltip';
 
 interface UIOverlayProps {
     stats: { hp: number; fuel: number; cargoHp: number; money: number; distance: number; distToNext: number };
@@ -41,13 +42,18 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatu
     return (
         <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between z-40 overflow-hidden font-vt323">
             {!isFullscreen && (
-                <button
-                    onClick={toggleFullscreen}
-                    className="absolute top-4 right-4 pointer-events-auto bg-slate-800/80 border border-slate-500 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm z-50 flex items-center gap-2 active:scale-95 transition-all text-xs"
-                >
-                    <span className="leading-none">⛶</span>
-                    <span>FULLSCREEN</span>
-                </button>
+                <div className="absolute top-4 right-4 pointer-events-auto flex items-center gap-1 group">
+                    <button
+                        onClick={toggleFullscreen}
+                        className="bg-slate-800/80 border border-slate-500 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm flex items-center gap-2 active:scale-95 transition-all text-xs"
+                    >
+                        <span className="leading-none">⛶</span>
+                        <span>FULLSCREEN</span>
+                    </button>
+                    <div className="opacity-60 hover:opacity-100 transition-opacity">
+                        <InfoTooltip text="將遊戲畫面切換至全螢幕模式，提升沉浸感。" position="left" />
+                    </div>
+                </div>
             )}
 
             <div className={`flex flex-col w-full ${isMobile ? 'gap-1' : 'gap-4'}`}>
