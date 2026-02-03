@@ -599,7 +599,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             if ((window as any).gameRefs) (window as any).gameRefs.handleCanvasMpEvent = undefined;
         };
 
-    }, [multiplayer?.isActive, resetDroneState, respawnLevel, setGameState, setFaceStatus, setVedalMessage]);
+    }, [multiplayer?.isActive, multiplayer?.manager]);
 
     // Host Broadcast Loop
     useEffect(() => {
