@@ -505,6 +505,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         levelRef.current.tutels = [];
         levelRef.current.urgentOrders = [];
 
+        // [FIX] Ensure the checkpoint wall exists on respawn (it might have been destroyed by the train)
+        const cpWallX = lastCheckpoint.x - 200;
+        const hasCheckpointWall = levelRef.current.walls.some(w =>
+            w.type === 'checkpoint' && Math.abs(w.x - cpWallX) < 10
+        );
+        if (!hasCheckpointWall) {
+            levelRef.current.walls.push({ x: cpWallX, y: 880, w: 400, h: 20, type: 'checkpoint' });
+        }
+
         // CRITICAL: In multiplayer, NEVER reset train unless explicitly forced (GLOBAL_RESTART)
         // Check multiplayer.isActive directly to ensure stability
         const isMultiplayer = multiplayer?.isActive === true;
