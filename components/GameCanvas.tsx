@@ -569,6 +569,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     respawnLevel();
                     setGameState(GameState.PLAYING);
                     setFaceStatus('idle');
+                } else if (event.data.type === 'PICKUP_COLLECT') {
+                    const { pickupType, x, y } = event.data;
+                    const levelData = levelRef.current;
+                    const threshold = 5;
+
+                    if (pickupType === 'COIN') {
+                        const coin = levelData.coins.find(c => !c.collected && Math.abs(c.x - x) < threshold && Math.abs(c.y - y) < threshold);
+                        if (coin) coin.collected = true;
+                    } else if (pickupType === 'ORDER') {
+                        const order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
+                        if (order) order.collected = true;
+                    } else if (pickupType === 'POWERUP') {
+                        const powerup = levelData.powerups.find(p => !p.collected && Math.abs(p.x - x) < threshold && Math.abs(p.y - y) < threshold);
+                        if (powerup) powerup.collected = true;
+                    }
                 }
             }
         };
@@ -1235,6 +1250,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 addMoney(coin.value);
                                 SoundManager.play('coin');
                                 setVedalMessage(`Collected $${coin.value}!||撿到 $${coin.value}！`);
+
+                                // [MULTIPLAYER] Sync coin collection
+                                if (multiplayer?.isActive && multiplayer.manager) {
+                                    multiplayer.manager.broadcast({
+                                        type: 'PICKUP_COLLECT',
+                                        pickupType: 'COIN',
+                                        x: coin.x,
+                                        y: coin.y
+                                    });
+                                }
                             }
                         }
                     });
@@ -1257,6 +1282,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
                                 SoundManager.play('win');
                                 setVedalMessage("RUSH ORDER START! Reach checkpoint in 45s!||急件任務開始！45秒內抵達存檔點！");
+
+                                // [MULTIPLAYER] Sync order collection
+                                if (multiplayer?.isActive && multiplayer.manager) {
+                                    multiplayer.manager.broadcast({
+                                        type: 'PICKUP_COLLECT',
+                                        pickupType: 'ORDER',
+                                        x: order.x,
+                                        y: order.y
+                                    });
+                                }
                             }
                         }
                     });
@@ -1283,6 +1318,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 } else if (p.type === 'SHIELD') {
                                     drone.invincibleTimer = 5;
                                     setVedalMessage("SHIELD ACTIVE! 5 Seconds.||護盾啟動！5秒。");
+                                }
+
+                                // [MULTIPLAYER] Sync powerup collection
+                                if (multiplayer?.isActive && multiplayer.manager) {
+                                    multiplayer.manager.broadcast({
+                                        type: 'PICKUP_COLLECT',
+                                        pickupType: 'POWERUP',
+                                        x: p.x,
+                                        y: p.y
+                                    });
                                 }
                             }
                         }
