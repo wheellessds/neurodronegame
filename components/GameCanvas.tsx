@@ -940,8 +940,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
                 }
 
-                // Hit Stop Logic
-                if (hitStopRef.current > 0 && gameState === GameState.PLAYING) {
+                // Hit Stop Logic: ALWAYS decay while loop is running to prevent freezes
+                if (hitStopRef.current > 0) {
                     hitStopRef.current -= dt;
                 } else if (gameState === GameState.PLAYING && drone.health > 0) {
                     frameCounterRef.current++;
@@ -1632,31 +1632,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             const isCargoDeath = ds?.reason === 'CARGO';
 
             // --- RENDER CARGO & ROPE ---
-            // Hide cargo if it's the source of death during the dying sequence
-            if (!isDying || !isCargoDeath) {
+            // Local cargo/rope only render if drone is alive AND cargo hasn't been destroyed
+            if (drone.health > 0 && cargo.health > 0) {
                 if (cargo.connected) {
                     ctx.beginPath(); ctx.moveTo(drone.pos.x, drone.pos.y); ctx.lineTo(cargo.pos.x, cargo.pos.y);
                     ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2; ctx.stroke();
                 }
-                // Render cargo body if:
-                // 1. It's NOT a cargo-death sequence (if it is, debris replaces it)
-                // 2. OR we are still in the pre-death phase
-                if (!isDying || !isCargoDeath) {
-                    ctx.save(); ctx.translate(cargo.pos.x, cargo.pos.y);
-                    ctx.fillStyle = '#d97706'; ctx.fillRect(-cargo.radius, -cargo.radius, cargo.radius * 2, cargo.radius * 2);
 
-                    if (upgrades.cargoLevel > 0) {
-                        ctx.strokeStyle = '#a3e635';
-                        ctx.lineWidth = 3;
-                        ctx.beginPath();
-                        ctx.moveTo(-cargo.radius, -cargo.radius);
-                        ctx.lineTo(cargo.radius, cargo.radius);
-                        ctx.moveTo(cargo.radius, -cargo.radius);
-                        ctx.lineTo(-cargo.radius, cargo.radius);
-                        ctx.strokeRect(-cargo.radius - 2, -cargo.radius - 2, cargo.radius * 2 + 4, cargo.radius * 2 + 4);
-                    }
-                    ctx.restore();
+                ctx.save(); ctx.translate(cargo.pos.x, cargo.pos.y);
+                ctx.fillStyle = '#d97706'; ctx.fillRect(-cargo.radius, -cargo.radius, cargo.radius * 2, cargo.radius * 2);
+
+                if (upgrades.cargoLevel > 0) {
+                    ctx.strokeStyle = '#a3e635';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(-cargo.radius, -cargo.radius);
+                    ctx.lineTo(cargo.radius, cargo.radius);
+                    ctx.moveTo(cargo.radius, -cargo.radius);
+                    ctx.lineTo(-cargo.radius, cargo.radius);
+                    ctx.strokeRect(-cargo.radius - 2, -cargo.radius - 2, cargo.radius * 2 + 4, cargo.radius * 2 + 4);
                 }
+                ctx.restore();
             }
 
             // --- RENDER DRONE ---
@@ -1731,6 +1727,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- RENDER REMOTE PLAYERS ---
             if (multiplayer?.isActive) {
                 multiplayer.remotePlayers.forEach(p => {
+                    if (!p.pos) return; // Safety check
                     const isDead = p.health <= 0;
 
                     if (isDead) {
