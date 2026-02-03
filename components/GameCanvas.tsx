@@ -265,7 +265,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     type: 'moving_wall',
                     moveConfig: { axis: 'y', range: 150, speed, initialPos: 550, offset: 0, phase: phase + Math.PI }
                 });
-                coins.push({ x: x + 30, y: 475, radius: 10, collected: false, value: 20 });
+                for (let j = 0; j < 3; j++) {
+                    coins.push({ x: x + 30, y: 400 + j * 50, radius: 10, collected: false, value: 20 });
+                }
             }
         }
         else if (biomeType === 1) {
@@ -286,6 +288,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         pos: { x: x + 150, y: y },
                         vel: { x: 0, y: 0 }, radius: 10, angle: 0, angularVel: 0, state: 'idle'
                     });
+                }
+                // [NEW] Add coins in ZigZag tunnel
+                for (let j = 0; j < 2; j++) {
+                    coins.push({ x: x + 50 + j * 100, y: y + (rngRef.current() - 0.5) * 60, radius: 10, collected: false, value: 20 });
                 }
                 x += 250;
                 y = up ? y + 150 : y - 150;
@@ -311,6 +317,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         moveConfig: { axis: 'x', range: 80, speed: 0.05, initialPos: x - 50, offset: 0, phase: i }
                     });
                 }
+                // [NEW] Reward risky laser passage with more coins
+                coins.push({ x: x + 15, y: gapY + opening / 2, radius: 12, collected: false, value: 50 });
             }
         }
         else {
@@ -326,7 +334,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     type: 'moving_wall',
                     moveConfig: { axis: 'x', range: 100, speed: 0.02, initialPos: x, offset: 0, phase: i * 1.5 }
                 });
-                coins.push({ x: x + 60, y: y - 30, radius: 10, collected: false, value: 30 });
+                // [NEW] Double coins on islands
+                coins.push({ x: x + 30, y: y - 30, radius: 10, collected: false, value: 30 });
+                coins.push({ x: x + 90, y: y - 30, radius: 10, collected: false, value: 30 });
             }
         }
 
