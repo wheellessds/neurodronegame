@@ -910,32 +910,32 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         triggerDeathSequence(drone.pos, 'TRAIN', Math.floor(maxDistanceRef.current / 10), trajectoryRef.current, cargoTrajectoryRef.current, levelRef.current.train.x);
                     }
 
-                    // [MULTIPLAYER] Checkpoint Destruction Check
-                    if (multiplayer?.isActive && !checkpointDestroyedRef.current && train.x > lastCheckpoint.x + 100) {
+                    // Checkpoint Destruction Check (Solo & Multiplayer)
+                    if (!checkpointDestroyedRef.current && train.x > lastCheckpoint.x + 100) {
                         checkpointDestroyedRef.current = true;
                         SoundManager.play('crash');
 
                         // Visual FX: Spawn Debris
                         const pieces: Debris[] = [];
-                        for (let i = 0; i < 8; i++) {
+                        for (let i = 0; i < 12; i++) {
                             const angle = Math.random() * Math.PI * 2;
-                            const speed = 3 + Math.random() * 5;
+                            const speed = 3 + Math.random() * 6;
                             pieces.push({
                                 x: lastCheckpoint.x + (Math.random() * 200),
-                                y: 880 + (Math.random() * 20),
+                                y: lastCheckpoint.y + Math.random() * 20,
                                 vx: Math.cos(angle) * speed,
                                 vy: Math.sin(angle) * speed - 5,
                                 angle: Math.random() * Math.PI * 2,
                                 va: (Math.random() - 0.5) * 0.5,
-                                size: 4 + Math.random() * 6,
-                                color: '#22c55e', // Green checkpoint color
+                                size: 5 + Math.random() * 8,
+                                color: '#10b981', // Checkpoint Emerald green
                                 life: 1.0
                             });
                         }
                         // Add to existing debris
                         debrisRef.current = [...debrisRef.current, ...pieces];
 
-                        // Remove Checkpoint Wall
+                        // Remove Checkpoint Wall logic
                         levelRef.current.walls = levelRef.current.walls.filter(w => w.type !== 'checkpoint');
                     }
                 }
@@ -1305,6 +1305,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                             setLastCheckpoint({ x: wall.x + wall.w / 2, y: wall.y - 50 });
                                             setGameState(GameState.CHECKPOINT_SHOP);
                                             SoundManager.play('shop');
+
+                                            // [NEW] Reset destruction state for the new checkpoint
+                                            checkpointDestroyedRef.current = false;
 
                                             const bonus = Math.floor(cargoRef.current.health * 0.5);
                                             addMoney(bonus);
