@@ -510,10 +510,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // Like initWorld, but DOES NOT clear levelRef.current.walls
         // It just resets drone, cargo, and train relative pos
         resetDroneState();
-        levelRef.current.powerups = [];
-        levelRef.current.coins = [];
-        levelRef.current.tutels = [];
-        levelRef.current.urgentOrders = [];
 
         // [FIX] Ensure the checkpoint wall exists on respawn (it might have been destroyed by the train)
         const cpWallX = lastCheckpoint.x - 200;
