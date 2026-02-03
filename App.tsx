@@ -89,7 +89,7 @@ const App: React.FC = () => {
 
   // New States for Room Admin & Browser
   const [showRoomBrowser, setShowRoomBrowser] = useState(false);
-  const [roomList, setRoomList] = useState<any[]>([]);
+  const [roomList, setRoomList] = useState<{ id: string, players: number, seed: string }[]>([]);
   const [waitingApproval, setWaitingApproval] = useState(false);
   const [joinApproved, setJoinApproved] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
@@ -106,12 +106,22 @@ const App: React.FC = () => {
   const [allPlayersDead, setAllPlayersDead] = useState(false);
   const [isPermanentlyDead, setIsPermanentlyDead] = useState(false);
   const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
+  const [pendingRequests, setPendingRequests] = useState<{ id: string, name: string }[]>([]);
+  const [settingsTab, setSettingsTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>('general');
+
+  // 准备状态管理
+  const [playerReadyStates, setPlayerReadyStates] = useState<Map<string, boolean>>(new Map());
+  const [isReady, setIsReady] = useState(false);
 
   // Refs for stable handleMultiplayerEvent state access
   const gameStateRef = useRef(gameState);
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   const remotePlayersRef = useRef(remotePlayers);
   useEffect(() => { remotePlayersRef.current = remotePlayers; }, [remotePlayers]);
+  const isMultiplayerHostRef = useRef(isMultiplayerHost);
+  useEffect(() => { isMultiplayerHostRef.current = isMultiplayerHost; }, [isMultiplayerHost]);
+  const multiplayerIdRef = useRef(multiplayerId);
+  useEffect(() => { multiplayerIdRef.current = multiplayerId; }, [multiplayerId]);
 
   // Custom Controls State
   const [controlsConfig, setControlsConfig] = useState<ControlsConfig>(DEFAULT_CONTROLS);
@@ -185,13 +195,20 @@ const App: React.FC = () => {
         next.delete(event.id);
         return next;
       });
+      // 清理玩家准备状态
+      setPlayerReadyStates(prev => {
+        const next = new Map(prev);
+        if (next.has(event.id)) {
+          next.delete(event.id);
+        }
+        return next;
+      });
     } else if (event.type === 'DATA') {
       // Handle System Events
       if (event.id === 'SYSTEM') {
         if (event.data.type === 'PENDING_REQUESTS_UPDATE') {
-          setRemotePlayers(prev => new Map(prev)); // Force update
-          if (mpManagerRef.current?.pendingRequests.length > 0) {
-            setVedalMessage(`New Join Request! check Settings > Admin.||有新的加入請求！請查看設定 > Admin。`);
+          if (mpManagerRef.current) {
+            setPendingRequests([...mpManagerRef.current.pendingRequests]);
           }
         } else if (event.data.type === 'KICKED') {
           console.log('You have been KICKED.');
@@ -204,10 +221,20 @@ const App: React.FC = () => {
       }
 
       if (event.data.type === 'PLAYER_STATE') {
+        const playerId = event.data.id || event.id;
+
+        // [ID 过滤] 如果包是发给自己（回流包），直接跳过更新 remotePlayers
+        if (playerId === (multiplayerIdRef.current || 'ME')) return;
+
+        // 房主转发逻辑: 将玩家状态转发给其他人
+        if (isMultiplayerHostRef.current && mpManagerRef.current && event.id !== 'SYSTEM') {
+          mpManagerRef.current.broadcast({ ...event.data, id: playerId });
+        }
+
         setRemotePlayers(prev => {
           const next = new Map(prev);
-          next.set(event.id, {
-            id: event.id,
+          next.set(playerId, {
+            id: playerId,
             pos: event.data.pos,
             angle: event.data.angle,
             health: event.data.health,
@@ -234,27 +261,50 @@ const App: React.FC = () => {
         setGameState(GameState.PLAYING);
         setVedalMessage("HOST STARTED THE GAME!||房主開始了遊戲！");
       } else if (event.data.type === 'PLAYER_DEATH') {
+        const playerId = event.data.id || event.id;
+
+        // 房主转发逻辑: 转发死亡事件
+        if (isMultiplayerHostRef.current && mpManagerRef.current && event.id !== 'SYSTEM') {
+          mpManagerRef.current.broadcast({ ...event.data, id: playerId });
+        }
+
+        // [排行榜去重] 房主发的死亡消息会以 SYSTEM 分身传回 handleMultiplayerEvent。
+        // 或者是本地玩家收到房主转发回来的自己的死亡消息。
+        // 若 playerId 就是我自己，则跳过（因为 handleCrash 已经本地更新过了）
+        if (playerId === (multiplayerIdRef.current || 'ME')) return;
+
         // Update room leaderboard
         setRoomLeaderboard(prev => {
-          const existing = prev.find(p => p.id === event.id);
+          const existing = prev.find(p => p.id === playerId);
           if (existing) {
-            return prev.map(p => p.id === event.id ? { ...p, distance: event.data.distance, isDead: true } : p);
+            return prev.map(p => p.id === playerId ? { ...p, distance: event.data.distance, isDead: true } : p);
           } else {
-            return [...prev, { id: event.id, distance: event.data.distance, persona: event.data.persona || 'NEURO', isDead: true }];
+            return [...prev, { id: playerId, distance: event.data.distance, persona: event.data.persona || 'NEURO', isDead: true }];
           }
         });
-        // Check if all players are dead
-        setTimeout(() => {
-          setRoomLeaderboard(current => {
-            const totalPlayers = remotePlayersRef.current.size + 1; // +1 for self
-            const deadPlayers = current.filter(p => p.isDead).length;
-            if (deadPlayers >= totalPlayers && totalPlayers > 1) {
-              setAllPlayersDead(true);
-              setIsSpectating(false);
-            }
-            return current;
-          });
-        }, 100);
+        // Check if all players are dead (Only host decides for everyone)
+        if (isMultiplayerHostRef.current) {
+          setTimeout(() => {
+            const totalPlayers = remotePlayersRef.current.size + 1;
+            setRoomLeaderboard(current => {
+              const deadPlayers = current.filter(p => p.isDead).length;
+              if (deadPlayers >= totalPlayers && totalPlayers > 1) {
+                // Host broadcasts authoritative GAME OVER
+                if (mpManagerRef.current) {
+                  mpManagerRef.current.broadcast({ type: 'GAME_OVER_ALL' });
+                }
+                setAllPlayersDead(true);
+                setIsSpectating(false);
+              }
+              return current;
+            });
+          }, 100);
+        }
+      } else if (event.data.type === 'GAME_OVER_ALL') {
+        // Authoritative GAME OVER from host
+        setAllPlayersDead(true);
+        setIsSpectating(false);
+        setVedalMessage("MISSION OVER. ALL DRONES LOST.||任務結束。所有無人機皆已墜毀。");
       } else if (event.data.type === 'GAME_RESTART') {
         // Host restarted the game - reset everything
         setAllPlayersDead(false);
@@ -267,6 +317,25 @@ const App: React.FC = () => {
         setWaitingApproval(false);
         setJoinApproved(true);
         setVedalMessage("HOST APPROVED YOUR ENTRY!||房主已批准加入！");
+      } else if (event.data.type === 'PLAYER_READY') {
+        // 玩家标记为准备
+        setPlayerReadyStates(prev => {
+          const next = new Map(prev);
+          next.set(event.id, true);
+          return next;
+        });
+        // 如果是房主,广播更新后的状态给所有人 (由 useEffect 处理同步更佳，但此处保持简单)
+      } else if (event.data.type === 'PLAYER_UNREADY') {
+        // 玩家取消准备
+        setPlayerReadyStates(prev => {
+          const next = new Map(prev);
+          next.set(event.id, false);
+          return next;
+        });
+      } else if (event.data.type === 'READY_STATE_SYNC') {
+        // 房主同步所有玩家的准备状态
+        const states = event.data.states as { [key: string]: boolean };
+        setPlayerReadyStates(new Map(Object.entries(states)));
       }
       // Round 2 Fix: Forward all DATA events to GameCanvas's unique handler
       (window as any).gameRefs?.handleCanvasMpEvent?.(event);
@@ -319,6 +388,20 @@ const App: React.FC = () => {
     }
   }, [displayStats.distance, highScore]);
 
+  // 房主自动同步准备状态给所有人
+  useEffect(() => {
+    if (isMultiplayerHost && mpManagerRef.current && playerReadyStates.size > 0) {
+      const states: { [key: string]: boolean } = {};
+      playerReadyStates.forEach((ready, id) => {
+        states[id] = ready;
+      });
+      mpManagerRef.current.broadcast({
+        type: 'READY_STATE_SYNC',
+        states: states
+      });
+    }
+  }, [playerReadyStates, isMultiplayerHost]);
+
   // Timer logic
   useEffect(() => {
     let interval: any;
@@ -368,7 +451,8 @@ const App: React.FC = () => {
     SoundManager.init();
     SoundManager.play('shop');
 
-    if (!document.fullscreenElement) {
+    // iOS Safari 的全屏 API 可能不可用或被阻止,不应阻塞游戏启动
+    if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
       document.documentElement.requestFullscreen().catch(() => { });
     }
 
@@ -426,6 +510,10 @@ const App: React.FC = () => {
         // Don't generate a random seed here
       }
       setGameState(GameState.WAITING_LOBBY);
+      setIsReady(true); // 选择角色即视为准备
+      if (mpManagerRef.current && !isMultiplayerHost) {
+        mpManagerRef.current.broadcast({ type: 'PLAYER_READY' });
+      }
       return;
     } else {
       setGameState(GameState.PLAYING);
@@ -542,6 +630,7 @@ const App: React.FC = () => {
 
     SoundManager.play('crash');
     setGameState(GameState.GAME_OVER);
+    if (multiplayerMode) setIsSpectating(true); // 死亡后自动开启观战
     setUrgentOrderProgress(null);
     setFinalDistance(finalDist);
     const penalty = 50;
@@ -576,7 +665,7 @@ const App: React.FC = () => {
 
       // Add self to room leaderboard
       setRoomLeaderboard(prev => {
-        const myId = multiplayerId || 'ME';
+        const myId = multiplayerIdRef.current || 'ME';
         const existing = prev.find(p => p.id === myId);
         if (existing) {
           return prev.map(p => p.id === myId ? { ...p, distance: finalDist, isDead: true } : p);
@@ -792,9 +881,12 @@ const App: React.FC = () => {
                         if (mpManagerRef.current) {
                           mpManagerRef.current.host();
                           setIsMultiplayerHost(true);
+                          setJoinApproved(true);
                           setVedalMessage("Hosting room. Share your ID!||創建房間成功。分享你的 ID！");
                           // Initialize local participant list
                           setRoomParticipants([{ id: mpManagerRef.current.myId || 'HOST', name: playerName }]);
+                          setPlayerReadyStates(new Map([[mpManagerRef.current.myId || 'HOST', true]])); // 房主默认准备
+                          setIsReady(true);
                         }
                       }}
                       className={`text-xs px-3 py-1.5 rounded font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${isMultiplayerHost ? 'bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
@@ -879,22 +971,52 @@ const App: React.FC = () => {
                     ✓ APPROVED! SELECT YOUR DRONE
                   </div>
                 )}
-                <button
-                  onClick={() => { setPersona(Persona.NEURO); handleStart(); }}
-                  className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
-                  disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
-                >
-                  <span className="pointer-events-none">PLAY AS NEURO</span>
-                  <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" />
-                </button>
-                <button
-                  onClick={() => { setPersona(Persona.EVIL); handleStart(); }}
-                  className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
-                  disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
-                >
-                  <span className="pointer-events-none">PLAY AS EVIL</span>
-                  <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" />
-                </button>
+                <div className="flex items-center gap-2 flex-1">
+                  <button
+                    onClick={() => { setPersona(Persona.NEURO); handleStart(); }}
+                    onTouchStart={(e) => {
+                      e.currentTarget.style.transform = 'scale(0.95)';
+                    }}
+                    onTouchEnd={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      // iOS Safari 有时不会触发 onClick,所以在 touch 事件中也执行
+                      if (!(multiplayerMode && !isMultiplayerHost && !joinApproved)) {
+                        e.preventDefault(); // 防止后续的 click 事件
+                        setPersona(Persona.NEURO);
+                        handleStart();
+                      }
+                    }}
+                    className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 touch-manipulation ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}`}
+                    disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
+                    style={{ WebkitTapHighlightColor: 'rgba(236, 72, 153, 0.3)', touchAction: 'manipulation' }}
+                  >
+                    PLAY AS NEURO
+                  </button>
+                  <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" position="right" />
+                </div>
+                <div className="flex items-center gap-2 flex-1">
+                  <button
+                    onClick={() => { setPersona(Persona.EVIL); handleStart(); }}
+                    onTouchStart={(e) => {
+                      e.currentTarget.style.transform = 'scale(0.95)';
+                    }}
+                    onTouchEnd={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      // iOS Safari 有时不会触发 onClick,所以在 touch 事件中也执行
+                      if (!(multiplayerMode && !isMultiplayerHost && !joinApproved)) {
+                        e.preventDefault(); // 防止后续的 click 事件
+                        setPersona(Persona.EVIL);
+                        handleStart();
+                      }
+                    }}
+                    className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 touch-manipulation ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}`}
+                    disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
+                    style={{ WebkitTapHighlightColor: 'rgba(220, 38, 38, 0.3)', touchAction: 'manipulation' }}
+                  >
+                    PLAY AS EVIL
+                  </button>
+                  <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" position="right" />
+                </div>
               </>
             )}
           </div>
@@ -991,6 +1113,14 @@ const App: React.FC = () => {
                           <div className={`absolute top-0 left-0 w-1 h-full ${p.id === multiplayerId ? 'bg-cyan-500' : 'bg-green-500'} opacity-50`}></div>
                           <span className="text-white font-bold text-sm truncate">{p.name}</span>
                           <span className="text-[9px] text-slate-500 font-mono mt-1">ID: {p.id.slice(-6)}</span>
+                          {/* 准备状态显示 */}
+                          <div className="mt-2 text-[10px] font-bold">
+                            {playerReadyStates.get(p.id) ? (
+                              <span className="text-green-400">✓ 已準備</span>
+                            ) : (
+                              <span className="text-yellow-500">⏳ 未準備</span>
+                            )}
+                          </div>
                           {p.id === multiplayerId && <span className="absolute top-1 right-1 text-[8px] bg-cyan-900/80 text-cyan-400 px-1 rounded border border-cyan-800 font-bold">YOU</span>}
                         </div>
                       ))
@@ -1013,9 +1143,20 @@ const App: React.FC = () => {
                       console.error("[LOBBY] mpManagerRef is null");
                     }
                   }}
-                  className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl shadow-[0_0_20px_rgba(34,197,94,0.6)] text-2xl tracking-widest animate-pulse cursor-pointer relative z-[310]"
+                  disabled={(() => {
+                    // 检查是否所有玩家都准备
+                    const allReady = roomParticipants.every(p => playerReadyStates.get(p.id) === true);
+                    return !allReady;
+                  })()}
+                  className={`w-full font-bold py-4 rounded-xl text-2xl tracking-widest cursor-pointer relative z-[310] transition-all ${roomParticipants.every(p => playerReadyStates.get(p.id) === true)
+                    ? 'bg-green-600 hover:bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.6)] animate-pulse text-white'
+                    : 'bg-gray-600 cursor-not-allowed text-gray-400'
+                    }`}
                 >
-                  START GAME (開始)
+                  {roomParticipants.every(p => playerReadyStates.get(p.id) === true)
+                    ? 'START GAME (開始)'
+                    : `等待玩家準備 (${roomParticipants.filter(p => playerReadyStates.get(p.id)).length}/${roomParticipants.length})`
+                  }
                 </button>
 
                 <button
@@ -1079,6 +1220,55 @@ const App: React.FC = () => {
                 }} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-4 rounded">SKIP</button>
               </div>
             </div>
+          </div>
+        )
+      }
+
+      {/* Joining Requests Notification Overlay */}
+      {
+        pendingRequests.length > 0 && isMultiplayerHost && (
+          <div className="absolute top-6 right-6 z-[500] space-y-3 pointer-events-auto">
+            {pendingRequests.map(req => (
+              <div key={req.id} className="bg-slate-900/90 border-2 border-yellow-500 p-4 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.4)] backdrop-blur-md animate-slide-in-right max-w-xs border-l-8">
+                <div className="flex justify-between items-start mb-2">
+                  <div className="font-bold text-yellow-500 text-sm tracking-widest uppercase">New Join Request</div>
+                  <div className="text-[10px] text-slate-500 font-mono">ID: {req.id.slice(-4)}</div>
+                </div>
+                <div className="text-white text-lg font-bold mb-4 flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                  {req.name}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      if (mpManagerRef.current) mpManagerRef.current.approveJoin(req.id, currentSeed);
+                      setPendingRequests(prev => prev.filter(p => p.id !== req.id));
+                    }}
+                    className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-sm transition-all active:scale-95"
+                  >
+                    ACCEPT
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (mpManagerRef.current) mpManagerRef.current.rejectJoin(req.id);
+                      setPendingRequests(prev => prev.filter(p => p.id !== req.id));
+                    }}
+                    className="bg-red-600/30 hover:bg-red-600 text-red-200 py-2 px-4 rounded-lg text-sm border border-red-500/50 transition-all active:scale-95"
+                  >
+                    REJECT
+                  </button>
+                </div>
+                <button
+                  onClick={() => {
+                    setSettingsTab('room');
+                    setShowSettings(true);
+                  }}
+                  className="w-full text-center text-slate-500 text-[10px] mt-2 underline hover:text-slate-300"
+                >
+                  Manage in Admin Menu
+                </button>
+              </div>
+            ))}
           </div>
         )
       }
@@ -1301,6 +1491,7 @@ const App: React.FC = () => {
           manager: mpManagerRef.current,
           remotePlayers
         }}
+        isSpectating={isSpectating}
         spectatorTargetId={spectatorTargetId}
         setSpectatorTargetId={setSpectatorTargetId}
       />
@@ -1346,6 +1537,7 @@ const App: React.FC = () => {
         isMobileMode={isMobileMode}
         onToggleMobileMode={() => setIsMobileMode(!isMobileMode)}
         onForceRestart={handleForceRestart}
+        initialTab={settingsTab}
       />
 
       {
@@ -1392,6 +1584,11 @@ const App: React.FC = () => {
           </div>
         )
       }
+
+      {/* Version Tag */}
+      <div className="absolute bottom-1 left-2 z-[1000] text-[8px] font-mono text-white/20 select-none pointer-events-none tracking-widest uppercase">
+        Ver. Alpha 1.0
+      </div>
     </div >
   );
 };

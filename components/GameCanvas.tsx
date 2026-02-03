@@ -64,6 +64,7 @@ interface GameCanvasProps {
         manager: MultiplayerManager | null;
         remotePlayers: Map<string, RemotePlayer>;
     };
+    isSpectating?: boolean;
     spectatorTargetId?: string | null;
     setSpectatorTargetId?: (id: string | null) => void;
 }
@@ -93,6 +94,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     ghostData,
     controls,
     multiplayer,
+    isSpectating,
     spectatorTargetId,
     setSpectatorTargetId
 }) => {
@@ -712,9 +714,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
             // Camera Target Logic (Spectator Support)
             let targetPos = drone.pos;
-            let isSpectating = false;
+            let effectiveIsSpectating = isSpectating;
             if (gameState === GameState.GAME_OVER && multiplayer?.isActive) {
-                isSpectating = true;
+                effectiveIsSpectating = true;
                 if (!spectatorTargetId) {
                     // Auto-pick first available
                     const players = Array.from(multiplayer.remotePlayers.values()).filter((p: any) => p.health > 0);
@@ -1527,7 +1529,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillStyle = '#1e293b';
             ctx.fillRect(0, 0, width, height);
 
-            if (isSpectating) {
+            if (effectiveIsSpectating) {
                 // Show Spectating Text
                 ctx.save();
                 ctx.font = 'bold 30px VT323';
@@ -1872,8 +1874,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 ctx.font = 'bold 16px VT323';
                 ctx.fillText("LIVE RANKING", boardX + 10, boardY + 20);
 
-                const allPlayers: any[] = Array.from(multiplayer.remotePlayers.values());
-                allPlayers.push({ id: multiplayer.manager?.myId || 'YOU', pos: drone.pos, health: drone.health });
+                const myId = multiplayer.manager?.myId || 'YOU';
+                const allPlayers: any[] = Array.from(multiplayer.remotePlayers.values())
+                    .filter((p: any) => p.id !== myId); // Double check filter
+                allPlayers.push({ id: myId, pos: drone.pos, health: drone.health });
 
                 allPlayers.sort((a: any, b: any) => b.pos.x - a.pos.x);
 

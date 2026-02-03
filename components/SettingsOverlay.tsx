@@ -32,6 +32,7 @@ interface SettingsOverlayProps {
     isMobileMode?: boolean;
     onToggleMobileMode?: () => void;
     onForceRestart?: () => void;
+    initialTab?: 'general' | 'keyboard' | 'mobile' | 'room';
 }
 
 export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
@@ -54,9 +55,10 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     onUpdatePersona,
     isMobileMode,
     onToggleMobileMode,
-    onForceRestart
+    onForceRestart,
+    initialTab
 }) => {
-    const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>('general');
+    const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>(initialTab || 'general');
     const [bindingKey, setBindingKey] = useState<keyof ControlsConfig['keys'] | null>(null);
     const [localSeed, setLocalSeed] = useState(currentSeed || '');
 
@@ -64,6 +66,11 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     useEffect(() => {
         if (currentSeed) setLocalSeed(currentSeed);
     }, [currentSeed]);
+
+    // Sync tab when initialTab changes
+    useEffect(() => {
+        if (initialTab) setActiveTab(initialTab);
+    }, [initialTab]);
 
     useEffect(() => {
         if (bindingKey) {

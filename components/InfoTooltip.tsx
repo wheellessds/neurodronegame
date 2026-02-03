@@ -16,9 +16,9 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({ text, position = 'top'
     };
 
     return (
-        <div className="relative inline-block ml-1 group pointer-events-auto">
+        <div className="relative inline-block ml-1 group pointer-events-none">
             <div
-                className="w-4 h-4 rounded-full border border-white/50 flex items-center justify-center text-[10px] cursor-help hover:bg-white/20 transition-colors"
+                className="w-4 h-4 rounded-full border border-white/50 flex items-center justify-center text-[10px] cursor-help hover:bg-white/20 transition-colors pointer-events-auto"
                 onMouseEnter={() => setVisible(true)}
                 onMouseLeave={() => setVisible(false)}
                 onClick={(e) => {
@@ -33,9 +33,9 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({ text, position = 'top'
                     {text}
                     {/* Arrow */}
                     <div className={`absolute w-0 h-0 border-4 ${position === 'top' ? 'border-t-cyan-500 border-l-transparent border-r-transparent border-b-transparent top-full left-1/2 -translate-x-1/2' :
-                            position === 'bottom' ? 'border-b-cyan-500 border-l-transparent border-r-transparent border-t-transparent bottom-full left-1/2 -translate-x-1/2' :
-                                position === 'left' ? 'border-l-cyan-500 border-t-transparent border-b-transparent border-r-transparent left-full top-1/2 -translate-y-1/2' :
-                                    'border-r-cyan-500 border-t-transparent border-b-transparent border-l-transparent right-full top-1/2 -translate-y-1/2'
+                        position === 'bottom' ? 'border-b-cyan-500 border-l-transparent border-r-transparent border-t-transparent bottom-full left-1/2 -translate-x-1/2' :
+                            position === 'left' ? 'border-l-cyan-500 border-t-transparent border-b-transparent border-r-transparent left-full top-1/2 -translate-y-1/2' :
+                                'border-r-cyan-500 border-t-transparent border-b-transparent border-l-transparent right-full top-1/2 -translate-y-1/2'
                         }`} />
                 </div>
             )}
