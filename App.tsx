@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { GameCanvas } from './components/GameCanvas';
 import { Shop } from './components/Shop';
@@ -108,6 +107,7 @@ const App: React.FC = () => {
   const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
   const [pendingRequests, setPendingRequests] = useState<{ id: string, name: string }[]>([]);
   const [settingsTab, setSettingsTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>('general');
+  const [mpUpdateRate, setMpUpdateRate] = useState<'low' | 'med' | 'high'>('med');
 
   // 准备状态管理
   const [playerReadyStates, setPlayerReadyStates] = useState<Map<string, boolean>>(new Map());
@@ -252,9 +252,15 @@ const App: React.FC = () => {
           });
           return next;
         });
+      } else if (event.data.type === 'SYNC_RATE') {
+        if (event.data.rate) {
+          setMpUpdateRate(event.data.rate);
+          setVedalMessage(`Host set sync rate to: ${event.data.rate.toUpperCase()}||房主調整同步頻率為: ${event.data.rate.toUpperCase()}`);
+        }
       } else if (event.data.type === 'SYNC_SEED') {
         setVedalMessage("Host synced the world seed!||房主同步了世界種子！");
         setCurrentSeed(event.data.seed);
+        setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint on new seed/restart
         setGameState(prev => {
           if (prev !== GameState.WAITING_LOBBY && prev !== GameState.PLAYING) {
             return GameState.MENU;
@@ -265,7 +271,15 @@ const App: React.FC = () => {
         // Increment gameKey to force map regeneration
         setGameKey(k => k + 1);
         setGameState(GameState.PLAYING);
+        setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint for all players
         setVedalMessage("HOST STARTED THE GAME!||房主開始了遊戲！");
+      } else if (event.data.type === 'GAME_RESTART') {
+        // Go to Lobby instead of Playing
+        setGameState(GameState.WAITING_LOBBY);
+        setAllPlayersDead(false);
+        setRoomLeaderboard([]);
+        setLastCheckpoint({ x: 200, y: 860 });
+        setVedalMessage("HOST RESTARTED THE GAME!||房主重啟了遊戲！");
       } else if (event.data.type === 'PLAYER_DEATH') {
         const playerId = event.data.id || event.id;
 
@@ -1524,6 +1538,7 @@ const App: React.FC = () => {
         isSpectating={isSpectating}
         spectatorTargetId={spectatorTargetId}
         setSpectatorTargetId={setSpectatorTargetId}
+        mpUpdateRate={mpUpdateRate}
       />
 
       <SettingsOverlay
@@ -1531,14 +1546,20 @@ const App: React.FC = () => {
         gameState={gameState}
         controls={controlsConfig}
         onUpdateControls={setControlsConfig}
-        onResume={() => {
-          if (gameState === GameState.PAUSED) setGameState(GameState.PLAYING);
-          setShowSettings(false);
-        }}
+        onResume={() => { setShowSettings(false); setGameState((prev) => prev === GameState.PAUSED ? GameState.PLAYING : prev); }}
         onQuit={() => { setShowSettings(false); setGameState(GameState.MENU); }}
-        onDifficultyToggle={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')}
+        onDifficultyToggle={() => setDifficulty(prev => prev === 'NORMAL' ? 'EASY' : 'NORMAL')}
         difficulty={difficulty}
-        onStartLayoutEdit={() => setIsLayoutEditing(true)}
+        onStartLayoutEdit={() => { setShowSettings(false); setIsLayoutEditing(true); }}
+        mpUpdateRate={mpUpdateRate}
+        setMpUpdateRate={(rate) => {
+          setMpUpdateRate(rate);
+          // If we are host (or even if we just want to suggest it), broadcast to room
+          // Ideally only Host enforces, but for now let's allow "Democratic Sync" or just Host
+          if (mpManagerRef.current) {
+            mpManagerRef.current.broadcast({ type: 'SYNC_RATE', rate });
+          }
+        }}
         multiplayer={{
           isActive: !!multiplayerMode,
           isHost: isMultiplayerHost,
@@ -1560,10 +1581,24 @@ const App: React.FC = () => {
           }
         }}
         playerName={playerName}
-        onUpdateName={setPlayerName}
+        onUpdateName={(name) => {
+          setPlayerName(name);
+          if (multiplayerMode && mpManagerRef.current && !isMultiplayerHost) {
+            mpManagerRef.current.broadcast({ type: 'PLAYER_READY' });
+          } else if (isMultiplayerHost) {
+            setPlayerReadyStates(prev => new Map(prev).set(mpManagerRef.current?.myId || 'HOST', true));
+          }
+        }}
         roomParticipants={roomParticipants}
         persona={persona}
-        onUpdatePersona={setPersona}
+        onUpdatePersona={(p) => {
+          setPersona(p);
+          if (multiplayerMode && mpManagerRef.current && !isMultiplayerHost) {
+            mpManagerRef.current.broadcast({ type: 'PLAYER_READY' });
+          } else if (isMultiplayerHost) {
+            setPlayerReadyStates(prev => new Map(prev).set(mpManagerRef.current?.myId || 'HOST', true));
+          }
+        }}
         isMobileMode={isMobileMode}
         onToggleMobileMode={() => setIsMobileMode(!isMobileMode)}
         onForceRestart={handleForceRestart}
@@ -1623,8 +1658,8 @@ const App: React.FC = () => {
       }
 
       {/* Version Tag */}
-      <div className="absolute bottom-1 left-2 z-[1000] text-[8px] font-mono text-white/20 select-none pointer-events-none tracking-widest uppercase">
-        Ver. Alpha 1.2 - UI Sync Fix
+      <div className="absolute bottom-1 left-1 z-[1000] text-[8px] text-white/20 font-mono tracking-tighter select-none pointer-events-none uppercase">
+        Alpha 1.2k
       </div>
     </div >
   );

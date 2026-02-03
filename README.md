@@ -190,6 +190,16 @@
 - **React 19 / TypeScript / HTML5 Canvas / Tailwind CSS**
 - **Vite Backend API**：專屬的 `leaderboardStoragePlugin` 用於處理本地 `leaderboard.json` 的讀寫。
 
+### Alpha 1.2k (Current)
+- 修復多人模式「重新開始」時其它玩家卡在等待介面的問題。
+- 優化大廳同步邏輯：現在所有玩家在重啟後會統一回到大廳。
+- 新增在大廳中變更頭像/暱稱時自動同步「準備狀態」的功能，解決房主無法開始遊戲的問題。
+
+### Alpha 1.2j
+- 實作房間同步機制：房主切換頻率將同步至全房。
+- 新增 60Hz (Realtime) 極致頻率選項。
+- 更新介面說明與頻率檔位。
+
 ### 除錯模式 (Admin Console)
 - 按下 `` ` `` (backtick) 開啟控制台。
 - `money` : 增加金錢。 / `god` : 無敵模式。 / `die` : 自殺。

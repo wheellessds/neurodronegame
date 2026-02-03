@@ -14,6 +14,8 @@ interface SettingsOverlayProps {
     onDifficultyToggle: () => void;
     difficulty: string;
     onStartLayoutEdit: () => void;
+    mpUpdateRate: 'low' | 'med' | 'high';
+    setMpUpdateRate: (rate: 'low' | 'med' | 'high') => void;
     multiplayer?: {
         isActive: boolean;
         isHost: boolean;
@@ -45,6 +47,8 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     onDifficultyToggle,
     difficulty,
     onStartLayoutEdit,
+    mpUpdateRate,
+    setMpUpdateRate,
     multiplayer,
     currentSeed,
     onUpdateSeed,
@@ -153,6 +157,28 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
                                 </button>
                             </SettingItem>
+
+                            <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-600">
+                                <label className="flex items-center gap-1 text-cyan-400 font-bold mb-2 tracking-widest text-sm">
+                                    MP SYNC RATE (連線頻率)
+                                    <InfoTooltip text="此設定會強制同步至全房間。設定越高，你看到的其它玩家就越流暢（因為所有人傳輸頻率都會提高），但也更吃網路流量。" />
+                                </label>
+                                <div className="flex gap-2">
+                                    {(['low', 'med', 'high'] as const).map(rate => (
+                                        <button
+                                            key={rate}
+                                            onClick={() => setMpUpdateRate(rate)}
+                                            className={`flex-1 py-4 rounded font-bold transition-all border-2 ${mpUpdateRate === rate
+                                                ? 'bg-cyan-600 border-cyan-400 text-white shadow-[0_0_10px_rgba(34,211,238,0.5)]'
+                                                : 'bg-slate-800 border-slate-600 text-slate-400 hover:bg-slate-700'
+                                                }`}
+                                        >
+                                            {rate.toUpperCase()}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
                             <div className="pt-4 border-t border-slate-800 text-center">
                                 <button
                                     onClick={onQuit}

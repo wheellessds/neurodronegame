@@ -94,7 +94,7 @@ export class MultiplayerManager {
 
         this.peer.on('error', (err) => {
             console.error('[Multiplayer] PeerJS error:', err.type, err);
-            let msg = `PeerJS Error: ${err.type}`;
+            let msg = `PeerJS Error: ${err.type} `;
             if (err.type === 'browser-incompatible') msg = "Browser doesn't support WebRTC!||瀏覽器不支援 WebRTC！";
             else if (err.type === 'peer-unavailable') msg = "Target player not found. Check ID.||找不到目標玩家。請檢查 ID 是否正確。";
             else if (err.type === 'network') msg = "Network error. Check Firewall/VPN.||網路錯誤。請檢查防火牆或 VPN 是否關閉。";

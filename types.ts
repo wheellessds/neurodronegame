@@ -184,3 +184,7 @@ export interface ControlsConfig {
   keys: KeyBindings;
   mobile: MobileLayout;
 }
+
+export interface NeuroSettings {
+  mpUpdateRate: 'low' | 'med' | 'high';
+}

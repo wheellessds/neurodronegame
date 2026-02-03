@@ -67,6 +67,7 @@ interface GameCanvasProps {
     isSpectating?: boolean;
     spectatorTargetId?: string | null;
     setSpectatorTargetId?: (id: string | null) => void;
+    mpUpdateRate?: 'low' | 'med' | 'high';
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -96,7 +97,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     multiplayer,
     isSpectating,
     spectatorTargetId,
-    setSpectatorTargetId
+    setSpectatorTargetId,
+    mpUpdateRate = 'med'
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
@@ -186,6 +188,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const deathSequenceRef = useRef<{ step: 'dying' | 'dead'; reason: string; distance: number; trajectory: { x: number, y: number }[]; cargoTrajectory: { x: number, y: number }[]; trainX?: number; startTime: number; pos: { x: number, y: number } } | null>(null);
 
     const mpSyncTimerRef = useRef(0);
+    const mpUpdateRateRef = useRef(mpUpdateRate);
+    useEffect(() => { mpUpdateRateRef.current = mpUpdateRate; }, [mpUpdateRate]);
     const trainGraceTimerRef = useRef(0);
 
     // Expose refs
@@ -586,8 +590,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
                 } else if (event.data.type === 'GLOBAL_RESTART') {
                     setVedalMessage("HOST INITIATED RESTART!||房主已重啟遊戲！");
+                    setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint
+                    initWorld(); // Full world reset including all walls
                     resetDroneState();
-                    respawnLevel();
                     setGameState(GameState.PLAYING);
                     setFaceStatus('idle');
                 } else if (event.data.type === 'PICKUP_COLLECT') {
@@ -1714,7 +1719,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // --- Multiplayer Sync ---
                     if (multiplayer?.isActive && multiplayer.manager) {
                         mpSyncTimerRef.current += dt;
-                        if (mpSyncTimerRef.current >= 6) { // Sync ~10 times per second (every 6 frames)
+                        // Low: 4 TPS (15 frames), Med: 10 TPS (6 frames), High: 20 TPS (3 frames)
+                        const currentRate = mpUpdateRateRef.current; // Read from ref
+                        // Low: 10 TPS (6 frames), Med: 20 TPS (3 frames), High: 60 TPS (1 frame)
+                        const syncInterval = currentRate === 'low' ? 6 : currentRate === 'med' ? 3 : 1;
+                        if (mpSyncTimerRef.current >= syncInterval) {
+                            mpSyncTimerRef.current -= syncInterval; // Maintain accumulation for accurate pacing
                             multiplayer.manager.broadcast({
                                 type: 'PLAYER_STATE',
                                 pos: drone.pos,
