@@ -184,7 +184,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const mpSyncTimerRef = useRef(0);
     const trainGraceTimerRef = useRef(0);
-    const checkpointDestroyedRef = useRef(false);
 
     // Expose refs
     // Expose refs
@@ -386,15 +385,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // [MULTIPLAYER FIX] Remove grace period so train kills immediately
         trainGraceTimerRef.current = 0;
 
-        // [FIX] Reset destruction state so future checkpoints can trigger effects
-        checkpointDestroyedRef.current = false;
-
     }, [upgrades, lastCheckpoint, setUrgentOrderProgress]);
 
-    // [FIX] Reset destruction flag when reaching a new checkpoint
-    useEffect(() => {
-        checkpointDestroyedRef.current = false;
-    }, [lastCheckpoint]);
 
     const triggerDeathSequence = useCallback((pos: { x: number, y: number }, reason: string, distance: number, trajectory: { x: number, y: number }[], cargoTrajectory: { x: number, y: number }[], trainX?: number) => {
         deathSequenceRef.current = {
@@ -473,7 +465,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         };
         lastBiomeRef.current = -1; // Reset biome tracking
         rngRef.current = MathUtils.createRng(MathUtils.stringToSeed(seed)); // Reset RNG for deterministic world start
-        checkpointDestroyedRef.current = false;
 
         const startWallX = lastCheckpoint.x - 400;
 
@@ -910,40 +901,43 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         triggerDeathSequence(drone.pos, 'TRAIN', Math.floor(maxDistanceRef.current / 10), trajectoryRef.current, cargoTrajectoryRef.current, levelRef.current.train.x);
                     }
 
-                    // Checkpoint Destruction Check (Solo & Multiplayer)
-                    // Trigger precisely when train front hits walls (wall.x = lastCheckpoint.x - 150)
-                    if (!checkpointDestroyedRef.current && train.x > lastCheckpoint.x - 150) {
-                        checkpointDestroyedRef.current = true;
-                        SoundManager.play('crash');
+                    // Refined Checkpoint Destruction Logic (Solo & Multiplayer)
+                    const trainFront = train.x + train.w;
+                    const currentWalls = levelRef.current.walls;
 
-                        // Visual FX: Spawn Debris
-                        const pieces: Debris[] = [];
-                        for (let i = 0; i < 15; i++) {
-                            const angle = Math.random() * Math.PI * 2;
-                            const speed = 3 + Math.random() * 6;
-                            pieces.push({
-                                x: lastCheckpoint.x - 150 + (Math.random() * 300), // Cover full 300px width
-                                y: lastCheckpoint.y + 50 + (Math.random() * 20), // Align with wall height
-                                vx: Math.cos(angle) * speed,
-                                vy: Math.sin(angle) * speed - 5,
-                                angle: Math.random() * Math.PI * 2,
-                                va: (Math.random() - 0.5) * 0.5,
-                                size: 5 + Math.random() * 8,
-                                color: '#10b981', // Checkpoint Emerald green
-                                life: 1.0
-                            });
-                        }
-                        // Add to existing debris
-                        debrisRef.current = [...debrisRef.current, ...pieces];
+                    // Identify checkpoints to destroy this frame (contact with train front)
+                    const hitCheckpoints = currentWalls.filter(w =>
+                        w.type === 'checkpoint' && trainFront > w.x
+                    );
 
-                        // Remove only the checkpoints that the train has reached/passed
-                        levelRef.current.walls = levelRef.current.walls.filter(w => {
-                            if (w.type === 'checkpoint') {
-                                // Keep checkpoints that are still ahead of the train front
-                                return w.x > train.x;
+                    if (hitCheckpoints.length > 0) {
+                        hitCheckpoints.forEach(cp => {
+                            SoundManager.play('crash');
+
+                            // Visual FX: Spawn Debris around THIS specific checkpoint
+                            const pieces: Debris[] = [];
+                            for (let i = 0; i < 15; i++) {
+                                const angle = Math.random() * Math.PI * 2;
+                                const speed = 3 + Math.random() * 6;
+                                pieces.push({
+                                    x: cp.x + (Math.random() * cp.w),
+                                    y: cp.y + (Math.random() * cp.h),
+                                    vx: Math.cos(angle) * speed,
+                                    vy: Math.sin(angle) * speed - 5,
+                                    angle: Math.random() * Math.PI * 2,
+                                    va: (Math.random() - 0.5) * 0.5,
+                                    size: 5 + Math.random() * 8,
+                                    color: '#10b981', // Checkpoint Emerald green
+                                    life: 1.0
+                                });
                             }
-                            return true;
+                            debrisRef.current = [...debrisRef.current, ...pieces];
                         });
+
+                        // Remove only the checkpoints that have been hit/passed
+                        levelRef.current.walls = currentWalls.filter(w =>
+                            !(w.type === 'checkpoint' && trainFront > w.x)
+                        );
                     }
                 }
 
@@ -1312,9 +1306,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                             setLastCheckpoint({ x: wall.x + wall.w / 2, y: wall.y - 50 });
                                             setGameState(GameState.CHECKPOINT_SHOP);
                                             SoundManager.play('shop');
-
-                                            // [NEW] Reset destruction state for the new checkpoint
-                                            checkpointDestroyedRef.current = false;
 
                                             const bonus = Math.floor(cargoRef.current.health * 0.5);
                                             addMoney(bonus);
