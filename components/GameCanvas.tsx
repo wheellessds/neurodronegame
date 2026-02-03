@@ -911,18 +911,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
 
                     // Checkpoint Destruction Check (Solo & Multiplayer)
-                    if (!checkpointDestroyedRef.current && train.x > lastCheckpoint.x + 100) {
+                    // Trigger precisely when train front hits walls (wall.x = lastCheckpoint.x - 150)
+                    if (!checkpointDestroyedRef.current && train.x > lastCheckpoint.x - 150) {
                         checkpointDestroyedRef.current = true;
                         SoundManager.play('crash');
 
                         // Visual FX: Spawn Debris
                         const pieces: Debris[] = [];
-                        for (let i = 0; i < 12; i++) {
+                        for (let i = 0; i < 15; i++) {
                             const angle = Math.random() * Math.PI * 2;
                             const speed = 3 + Math.random() * 6;
                             pieces.push({
-                                x: lastCheckpoint.x + (Math.random() * 200),
-                                y: lastCheckpoint.y + Math.random() * 20,
+                                x: lastCheckpoint.x - 150 + (Math.random() * 300), // Cover full 300px width
+                                y: lastCheckpoint.y + 50 + (Math.random() * 20), // Align with wall height
                                 vx: Math.cos(angle) * speed,
                                 vy: Math.sin(angle) * speed - 5,
                                 angle: Math.random() * Math.PI * 2,

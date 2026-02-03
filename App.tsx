@@ -288,7 +288,7 @@ const App: React.FC = () => {
           const next = new Map(prev);
           const p = next.get(playerId);
           if (p) {
-            next.set(playerId, { ...p, health: 0 });
+            next.set(playerId, { ...p as any, health: 0 });
           } else {
             // If we don't have the player yet (rare), create entry to track death location
             next.set(playerId, {
