@@ -282,6 +282,26 @@ const App: React.FC = () => {
             return [...prev, { id: playerId, distance: event.data.distance, persona: event.data.persona || 'NEURO', isDead: true }];
           }
         });
+
+        // [SYNC REMOTE DEATH STATE] Explicitly update remote player's health to 0 to trigger 'X' marker in GameCanvas
+        setRemotePlayers(prev => {
+          const next = new Map(prev);
+          const p = next.get(playerId);
+          if (p) {
+            next.set(playerId, { ...p, health: 0 });
+          } else {
+            // If we don't have the player yet (rare), create entry to track death location
+            next.set(playerId, {
+              id: playerId,
+              pos: event.data.pos || { x: 0, y: 0 },
+              angle: 0,
+              health: 0,
+              persona: event.data.persona || 'NEURO',
+              lastUpdate: Date.now()
+            });
+          }
+          return next;
+        });
         // Check if all players are dead (Only host decides for everyone)
         if (isMultiplayerHostRef.current) {
           setTimeout(() => {
@@ -682,6 +702,10 @@ const App: React.FC = () => {
           if (deadPlayers >= totalPlayers && totalPlayers > 1) {
             setAllPlayersDead(true);
             setIsSpectating(false);
+            // [HOST BROADCAST] Synchronize final game over to all clients
+            if (mpManagerRef.current) {
+              mpManagerRef.current.broadcast({ type: 'GAME_OVER_ALL' });
+            }
           }
           return current;
         });
