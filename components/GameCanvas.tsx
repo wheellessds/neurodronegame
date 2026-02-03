@@ -593,11 +593,36 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 } else if (event.data.type === 'PICKUP_COLLECT') {
                     const { pickupType, x, y } = event.data;
                     const levelData = levelRef.current;
-                    const threshold = 5;
+                    // [SYNC FIX] Increase threshold to handle floating point differences and slight desyncs
+                    const threshold = 50;
+
+                    console.log(`[PICKUP] Rcv ${pickupType} at ${Math.floor(x)},${Math.floor(y)}`);
 
                     if (pickupType === 'COIN') {
-                        const coin = levelData.coins.find(c => !c.collected && Math.abs(c.x - x) < threshold && Math.abs(c.y - y) < threshold);
-                        if (coin) coin.collected = true;
+                        // 1. Try exact/close match
+                        let coin = levelData.coins.find(c => !c.collected && Math.abs(c.x - x) < threshold && Math.abs(c.y - y) < threshold);
+
+                        // 2. Fallback: Find closest coin within reasonable range (100)
+                        if (!coin) {
+                            const nearby = levelData.coins.filter(c => !c.collected && Math.abs(c.x - x) < 100 && Math.abs(c.y - y) < 100);
+                            if (nearby.length > 0) {
+                                // Find closest
+                                nearby.sort((a, b) => {
+                                    const da = Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2);
+                                    const db = Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2);
+                                    return da - db;
+                                });
+                                coin = nearby[0];
+                                console.log('[PICKUP] Used fallback fuzzy match for coin');
+                            }
+                        }
+
+                        if (coin) {
+                            coin.collected = true;
+                            console.log('[PICKUP] Sync Success: Coin collected');
+                        } else {
+                            console.warn('[PICKUP] Sync Failed: No coin found at target');
+                        }
                     } else if (pickupType === 'ORDER') {
                         const order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
                         if (order) order.collected = true;
