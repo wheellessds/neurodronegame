@@ -599,8 +599,28 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         if (powerup) powerup.collected = true;
                     }
                 } else if (event.data.type === 'SYNC_MAP_STATE') {
-                    // [MAP SYNC] Sync map generation state from host
-                    nextGenX.current = event.data.nextGenX;
+                    // [MAP SYNC]
+                    // If we are significantly behind (e.g. spectator join, or late join), we must catch up.
+                    // CRITICAL: We must RESET RNG state if we are desynced, otherwise our map will be different even with same seed.
+                    const targetGenX = event.data.nextGenX;
+                    const delta = targetGenX - nextGenX.current;
+
+                    // If delta is huge (e.g. > 2000), or negative (we generated ahead but wrong), we assume desync.
+                    // Or if we are spectating and just started.
+                    if (delta > 2000 || delta < -500) {
+                        console.log('[MAP_SYNC] DESYNC DETECTED. Hard Resetting & Catching up...', { current: nextGenX.current, target: targetGenX });
+
+                        // 1. Reset World (Resets RNG, Walls, Coins, etc.)
+                        initWorld();
+
+                        // 2. Fast Forward Generation to match host
+                        let attempts = 0;
+                        while (nextGenX.current < targetGenX && attempts < 1000) {
+                            nextGenX.current = generateChunk(nextGenX.current);
+                            attempts++;
+                        }
+                        console.log('[MAP_SYNC] Catch up complete.', { current: nextGenX.current });
+                    }
                 }
             }
         };
