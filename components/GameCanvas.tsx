@@ -606,28 +606,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         if (!coin) {
                             const nearby = levelData.coins.filter(c => !c.collected && Math.abs(c.x - x) < 100 && Math.abs(c.y - y) < 100);
                             if (nearby.length > 0) {
-                                // Find closest
-                                nearby.sort((a, b) => {
-                                    const da = Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2);
-                                    const db = Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2);
-                                    return da - db;
-                                });
+                                nearby.sort((a, b) => (Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2)) - (Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2)));
                                 coin = nearby[0];
-                                console.log('[PICKUP] Used fallback fuzzy match for coin');
                             }
                         }
 
-                        if (coin) {
-                            coin.collected = true;
-                            console.log('[PICKUP] Sync Success: Coin collected');
-                        } else {
-                            console.warn('[PICKUP] Sync Failed: No coin found at target');
-                        }
+                        if (coin) coin.collected = true;
                     } else if (pickupType === 'ORDER') {
-                        const order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
+                        let order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
+
+                        if (!order) {
+                            const nearby = levelData.urgentOrders.filter(o => !o.collected && Math.abs(o.x - x) < 100 && Math.abs(o.y - y) < 100);
+                            if (nearby.length > 0) {
+                                nearby.sort((a, b) => (Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2)) - (Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2)));
+                                order = nearby[0];
+                            }
+                        }
                         if (order) order.collected = true;
                     } else if (pickupType === 'POWERUP') {
-                        const powerup = levelData.powerups.find(p => !p.collected && Math.abs(p.x - x) < threshold && Math.abs(p.y - y) < threshold);
+                        let powerup = levelData.powerups.find(p => !p.collected && Math.abs(p.x - x) < threshold && Math.abs(p.y - y) < threshold);
+
+                        if (!powerup) {
+                            const nearby = levelData.powerups.filter(p => !p.collected && Math.abs(p.x - x) < 100 && Math.abs(p.y - y) < 100);
+                            if (nearby.length > 0) {
+                                nearby.sort((a, b) => (Math.pow(a.x - x, 2) + Math.pow(a.y - y, 2)) - (Math.pow(b.x - x, 2) + Math.pow(b.y - y, 2)));
+                                powerup = nearby[0];
+                            }
+                        }
                         if (powerup) powerup.collected = true;
                     }
                 } else if (event.data.type === 'SYNC_MAP_STATE') {
