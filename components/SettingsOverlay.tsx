@@ -29,6 +29,9 @@ interface SettingsOverlayProps {
     roomParticipants?: { id: string, name: string }[];
     persona: Persona;
     onUpdatePersona: (p: Persona) => void;
+    isMobileMode?: boolean;
+    onToggleMobileMode?: () => void;
+    onForceRestart?: () => void;
 }
 
 export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
@@ -48,7 +51,10 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     onUpdateName,
     roomParticipants,
     persona,
-    onUpdatePersona
+    onUpdatePersona,
+    isMobileMode,
+    onToggleMobileMode,
+    onForceRestart
 }) => {
     const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>('general');
     const [bindingKey, setBindingKey] = useState<keyof ControlsConfig['keys'] | null>(null);
@@ -131,6 +137,14 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                         EVIL
                                     </button>
                                 </div>
+                            </SettingItem>
+                            <SettingItem label="MOBILE MODE (手機模式)" info="手動開啟或關閉手機虛擬按鍵。">
+                                <button
+                                    onClick={onToggleMobileMode}
+                                    className={`w-16 h-8 rounded-full transition-colors relative border-2 border-cyan-700 ${isMobileMode ? 'bg-pink-500' : 'bg-slate-700'}`}
+                                >
+                                    <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
+                                </button>
                             </SettingItem>
                             <div className="pt-4 border-t border-slate-800 text-center">
                                 <button
@@ -254,6 +268,21 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                             ))}
                                         </div>
                                     )}
+
+                                    {/* Dangerous Actions */}
+                                    <div className="pt-4 border-t border-slate-700">
+                                        <button
+                                            onClick={() => {
+                                                if (confirm("確定要強制重啟所有玩家嗎？ (FORCE RESTART ALL?)")) {
+                                                    onForceRestart?.();
+                                                }
+                                            }}
+                                            className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded shadow-lg transition-transform active:scale-95"
+                                        >
+                                            FORCE RESTART ALL (強制全員重啟)
+                                        </button>
+                                        <p className="text-[10px] text-red-400 mt-1 text-center font-sans tracking-normal">此操作將重置包含您在內的所有玩家至起點。</p>
+                                    </div>
                                 </div>
                             )}
 

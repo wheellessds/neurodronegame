@@ -105,6 +105,7 @@ const App: React.FC = () => {
   const [roomLeaderboard, setRoomLeaderboard] = useState<{ id: string, distance: number, persona: string, isDead: boolean }[]>([]);
   const [allPlayersDead, setAllPlayersDead] = useState(false);
   const [isPermanentlyDead, setIsPermanentlyDead] = useState(false);
+  const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
 
   // Refs for stable handleMultiplayerEvent state access
   const gameStateRef = useRef(gameState);
@@ -629,6 +630,27 @@ const App: React.FC = () => {
     setEquippedItem(item);
   };
 
+  const handleNextSpectate = () => {
+    if (!multiplayerMode) return;
+    const players = Array.from(remotePlayers.values()).filter((p: any) => p.health > 0);
+    if (players.length === 0) return;
+
+    setSpectatorTargetId(currentId => {
+      if (!currentId) return (players[0] as any).id;
+      const currentIndex = players.findIndex((p: any) => p.id === currentId);
+      const nextIndex = (currentIndex + 1) % players.length;
+      return (players[nextIndex] as any).id;
+    });
+  };
+
+  const handleForceRestart = () => {
+    if (multiplayerMode && isMultiplayerHost && mpManagerRef.current) {
+      mpManagerRef.current.broadcast({ type: 'GLOBAL_RESTART' });
+      // Also trigger locally
+      handleMultiplayerEvent({ type: 'DATA', id: 'SYSTEM', data: { type: 'GLOBAL_RESTART' } });
+    }
+  };
+
   const handleRestartFull = () => handleStart();
 
   const handleBuyRefuel = () => {
@@ -862,7 +884,7 @@ const App: React.FC = () => {
                   className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                   disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                 >
-                  PLAY AS NEURO
+                  <span className="pointer-events-none">PLAY AS NEURO</span>
                   <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" />
                 </button>
                 <button
@@ -870,7 +892,7 @@ const App: React.FC = () => {
                   className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 flex items-center justify-center gap-1 ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                   disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                 >
-                  PLAY AS EVIL
+                  <span className="pointer-events-none">PLAY AS EVIL</span>
                   <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" />
                 </button>
               </>
@@ -1231,8 +1253,9 @@ const App: React.FC = () => {
 
       {
         isSpectating && (
-          <div className="absolute top-4 right-4 z-[200] pointer-events-auto">
-            <button onClick={() => setIsSpectating(false)} className="bg-red-600 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-white hover:scale-105 transition-transform">EXIT SPECTATE</button>
+          <div className="absolute top-4 right-4 z-[200] pointer-events-auto flex flex-col gap-2">
+            <button onClick={() => setIsSpectating(false)} className="bg-red-600 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-white hover:scale-105 transition-transform">EXIT SPECTATE (退出觀戰)</button>
+            <button onClick={handleNextSpectate} className="bg-cyan-600 text-white font-bold py-2 px-4 rounded shadow-lg border-2 border-white hover:scale-105 transition-transform">NEXT PLAYER (下一個玩家)</button>
           </div>
         )
       }
@@ -1278,6 +1301,8 @@ const App: React.FC = () => {
           manager: mpManagerRef.current,
           remotePlayers
         }}
+        spectatorTargetId={spectatorTargetId}
+        setSpectatorTargetId={setSpectatorTargetId}
       />
 
       <SettingsOverlay
@@ -1318,6 +1343,9 @@ const App: React.FC = () => {
         roomParticipants={roomParticipants}
         persona={persona}
         onUpdatePersona={setPersona}
+        isMobileMode={isMobileMode}
+        onToggleMobileMode={() => setIsMobileMode(!isMobileMode)}
+        onForceRestart={handleForceRestart}
       />
 
       {

@@ -64,6 +64,8 @@ interface GameCanvasProps {
         manager: MultiplayerManager | null;
         remotePlayers: Map<string, RemotePlayer>;
     };
+    spectatorTargetId?: string | null;
+    setSpectatorTargetId?: (id: string | null) => void;
 }
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({
@@ -90,7 +92,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     isLayoutEditing = false,
     ghostData,
     controls,
-    multiplayer
+    multiplayer,
+    spectatorTargetId,
+    setSpectatorTargetId
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const requestRef = useRef<number>(0);
@@ -178,7 +182,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const mpSyncTimerRef = useRef(0);
     const trainGraceTimerRef = useRef(0);
-    const [spectatorTargetId, setSpectatorTargetId] = useState<string | null>(null);
     const checkpointDestroyedRef = useRef(false);
 
     // Expose refs
@@ -714,14 +717,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 isSpectating = true;
                 if (!spectatorTargetId) {
                     // Auto-pick first available
-                    const first = multiplayer.remotePlayers.values().next();
-                    if (!first.done) setSpectatorTargetId(first.value.id);
+                    const players = Array.from(multiplayer.remotePlayers.values()).filter((p: any) => p.health > 0);
+                    if (players.length > 0) setSpectatorTargetId?.((players[0] as any).id);
                 } else {
                     const target = multiplayer.remotePlayers.get(spectatorTargetId);
-                    if (target) {
+                    if (target && target.health > 0) {
                         targetPos = target.pos;
                     } else {
-                        setSpectatorTargetId(null);
+                        setSpectatorTargetId?.(null);
                     }
                 }
             }
@@ -1725,6 +1728,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- RENDER REMOTE PLAYERS ---
             if (multiplayer?.isActive) {
                 multiplayer.remotePlayers.forEach(p => {
+                    // Only render alive remote players
+                    if (p.health <= 0) return;
+
                     // Draw Rope & Cargo if available
                     if (p.cargoPos) {
                         ctx.beginPath();
