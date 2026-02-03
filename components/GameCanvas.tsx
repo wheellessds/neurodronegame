@@ -1485,8 +1485,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         triggerDeathSequence(cargo.pos, 'CARGO', Math.floor(maxDistanceRef.current / 10), trajectoryRef.current, cargoTrajectoryRef.current, levelRef.current.train.x);
                     }
 
-                    if (drone.health > 0) {
-                        if (drone.pos.x > maxDistanceRef.current) maxDistanceRef.current = drone.pos.x;
+                    if (cargo.health > 0 && cargo.connected) {
+                        if (cargo.pos.x > maxDistanceRef.current) maxDistanceRef.current = cargo.pos.x;
                     }
 
                     const hpPct = (drone.health / drone.maxHealth) * 100;
@@ -1494,7 +1494,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     const cargoPct = (cargo.health / cargo.maxHealth) * 100;
 
                     const scaledDistance = Math.floor(maxDistanceRef.current / 10);
-                    const distToNext = Math.floor(Math.max(0, nextCheckpointX.current - drone.pos.x) / 10);
+                    const distToNext = Math.floor(Math.max(0, nextCheckpointX.current - cargo.pos.x) / 10);
 
                     // Throttle UI updates to ~10fps to save performance
                     statsThrottleTimer += dt;
