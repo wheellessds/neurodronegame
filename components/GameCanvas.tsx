@@ -156,6 +156,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const nextCheckpointX = useRef<number>(Constants.CHECKPOINT_INTERVAL);
     const maxDistanceRef = useRef<number>(0);
     const lastBiomeRef = useRef<number>(-1); // Track last biome to prevent repetition
+    // [MAP SYNC] Track the X coordinate where the current map generation sequence started
+    // This is critical for spectators to replicate the exact RNG sequence relative to coordinates.
+    const mapGenerationStartX = useRef<number>(0);
 
     // Track the exact X coordinate of the wall where we last delivered to prevent spamming
     const lastDeliveryWallX = useRef<number>(-9999);
@@ -489,6 +492,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         lastDeliveryWallX.current = cpWallX;
 
         let genX = lastCheckpoint.x + 400;
+
+        // [MAP SYNC] Record the start X.
+        mapGenerationStartX.current = genX;
+
         for (let i = 0; i < 3; i++) {
             genX = generateChunk(genX);
         }
@@ -603,22 +610,66 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // If we are significantly behind (e.g. spectator join, or late join), we must catch up.
                     // CRITICAL: We must RESET RNG state if we are desynced, otherwise our map will be different even with same seed.
                     const targetGenX = event.data.nextGenX;
+                    const hostGenStartX = event.data.mapGenStartX || 0;
+
                     const delta = targetGenX - nextGenX.current;
+                    // Check if our generation start point mismatches the host's
+                    // If host started at 3400 and we started at 0, our RNG sequence is misaligned with coordinates.
+                    const originMismatch = Math.abs(mapGenerationStartX.current - hostGenStartX) > 10;
 
-                    // If delta is huge (e.g. > 2000), or negative (we generated ahead but wrong), we assume desync.
-                    // Or if we are spectating and just started.
-                    if (delta > 2000 || delta < -500) {
-                        console.log('[MAP_SYNC] DESYNC DETECTED. Hard Resetting & Catching up...', { current: nextGenX.current, target: targetGenX });
+                    // If delta is huge (e.g. > 2000), or negative, or ORIGIN MISMATCH.
+                    if (delta > 2000 || delta < -500 || originMismatch) {
+                        console.log('[MAP_SYNC] DESYNC DETECTED. Hard Resetting & Catching up...', { current: nextGenX.current, target: targetGenX, hostStart: hostGenStartX, localStart: mapGenerationStartX.current });
 
-                        // 1. Reset World (Resets RNG, Walls, Coins, etc.)
-                        initWorld();
+                        // 1. Reset World Data (Walls, Coins, etc.)
+                        const savedTrain = levelRef.current.train ? { ...levelRef.current.train } : undefined;
+                        levelRef.current = {
+                            walls: [],
+                            obstacles: [],
+                            coins: [],
+                            powerups: [],
+                            tutels: [],
+                            gasZones: [],
+                            urgentOrders: [],
+                            train: savedTrain || { x: -800, y: 0, speed: 3.5, w: 120, h: 40 }
+                        };
+                        lastBiomeRef.current = -1;
 
-                        // 2. Fast Forward Generation to match host
+                        // 2. Reset RNG
+                        rngRef.current = MathUtils.createRng(MathUtils.stringToSeed(seed));
+
+                        // 3. Set Baseline based on Host's Generation Start
+                        // Host initWorld logic: 
+                        // genX = lastCheckpoint.x + 400  =>  hostGenStartX
+                        // nextCheckpointX = lastCheckpoint.x + INTERVAL
+                        // So: nextCheckpointX = (hostGenStartX - 400) + INTERVAL
+                        mapGenerationStartX.current = hostGenStartX;
+                        nextCheckpointX.current = (hostGenStartX - 400) + Constants.CHECKPOINT_INTERVAL;
+
+                        // 4. Manual "initWorld" Platform Generation (Replicating initWorld logic)
+                        const startWallX = (hostGenStartX - 400) - 400; // lastCheckpoint.x - 400
+                        levelRef.current.walls.push({ x: startWallX - 400, y: 900, w: 1200, h: 1000, type: 'wall' }); // Floor
+                        levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
+                        // Checkpad
+                        const cpWallX = (hostGenStartX - 400) - 200;
+                        levelRef.current.walls.push({ x: cpWallX, y: 880, w: 400, h: 20, type: 'checkpoint' });
+
+                        // 5. Fast Forward Generation
+                        let simGenX = hostGenStartX;
+
+                        // Replicate the initial 3 chunks from initWorld
+                        for (let i = 0; i < 3; i++) {
+                            simGenX = generateChunk(simGenX);
+                        }
+
+                        // Catch up the rest
                         let attempts = 0;
-                        while (nextGenX.current < targetGenX && attempts < 1000) {
-                            nextGenX.current = generateChunk(nextGenX.current);
+                        while (simGenX < targetGenX && attempts < 2000) {
+                            simGenX = generateChunk(simGenX);
                             attempts++;
                         }
+
+                        nextGenX.current = simGenX;
                         console.log('[MAP_SYNC] Catch up complete.', { current: nextGenX.current });
                     }
                 }
@@ -664,7 +715,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 multiplayer.manager?.broadcast({
                     type: 'SYNC_ENV',
                     train: { x: train.x, speed: train.speed },
-                    nextGenX: nextGenX.current // [MAP SYNC] Broadcast map generation progress
+                    nextGenX: nextGenX.current, // [MAP SYNC] Broadcast map generation progress
+                    mapGenStartX: mapGenerationStartX.current // [MAP SYNC] Broadcast origin to align RNG
                 });
             }
         }, 100);
