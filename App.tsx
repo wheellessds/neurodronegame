@@ -1611,7 +1611,7 @@ const App: React.FC = () => {
 
       {/* Version Tag */}
       <div className="absolute bottom-1 left-2 z-[1000] text-[8px] font-mono text-white/20 select-none pointer-events-none tracking-widest uppercase">
-        Ver. Alpha 1.0
+        Ver. Alpha 1.1 - Spectator Sync Fix
       </div>
     </div >
   );
