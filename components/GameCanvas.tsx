@@ -936,8 +936,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         // Add to existing debris
                         debrisRef.current = [...debrisRef.current, ...pieces];
 
-                        // Remove Checkpoint Wall logic
-                        levelRef.current.walls = levelRef.current.walls.filter(w => w.type !== 'checkpoint');
+                        // Remove only the checkpoints that the train has reached/passed
+                        levelRef.current.walls = levelRef.current.walls.filter(w => {
+                            if (w.type === 'checkpoint') {
+                                // Keep checkpoints that are still ahead of the train front
+                                return w.x > train.x;
+                            }
+                            return true;
+                        });
                     }
                 }
 
