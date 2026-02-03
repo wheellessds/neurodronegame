@@ -1330,7 +1330,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         const p = particlesRef.current[i];
                         p.x += p.vx * dt;
                         p.y += p.vy * dt;
-                        p.life -= dt;
+                        p.life -= dt / 60;
                         if (p.life <= 0) particlesRef.current.splice(i, 1);
                     }
 
@@ -1339,14 +1339,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         d.x += d.vx * dt;
                         d.y += d.vy * dt;
                         d.angle += d.vAngle * dt;
-                        d.life -= dt;
+                        d.life -= dt / 60; // Debris life is also in seconds
                         if (d.life <= 0) debrisRef.current.splice(i, 1);
                     }
 
                     for (let i = damageTextsRef.current.length - 1; i >= 0; i--) {
                         const t = damageTextsRef.current[i];
-                        t.y -= 20 * dt; // Float up
-                        t.life -= dt;
+                        t.y -= 1 * dt; // Float up slower
+                        t.life -= dt / 60;
                         if (t.life <= 0) damageTextsRef.current.splice(i, 1);
                     }
 
@@ -1704,9 +1704,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     const scaledDistance = Math.floor(maxDistanceRef.current / 10);
                     const distToNext = Math.floor(Math.max(0, nextCheckpointX.current - cargo.pos.x) / 10);
 
-                    // Throttle UI updates to ~4fps to save performance
+                    // Throttle UI updates to ~4fps (every 15 frames)
                     statsThrottleTimer += dt;
-                    if (statsThrottleTimer >= 0.25) {
+                    if (statsThrottleTimer >= 15) {
                         setStats(hpPct, fuelPct, cargoPct, scaledDistance, distToNext, levelRef.current.train.x);
                         statsThrottleTimer = 0;
                     }
@@ -1714,7 +1714,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // --- Multiplayer Sync ---
                     if (multiplayer?.isActive && multiplayer.manager) {
                         mpSyncTimerRef.current += dt;
-                        if (mpSyncTimerRef.current >= 0.1) { // Sync ~10 times per second
+                        if (mpSyncTimerRef.current >= 6) { // Sync ~10 times per second (every 6 frames)
                             multiplayer.manager.broadcast({
                                 type: 'PLAYER_STATE',
                                 pos: drone.pos,
