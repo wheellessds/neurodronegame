@@ -445,6 +445,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // Visual effects
         shakeRef.current = 25;
+        hitStopRef.current = 0; // [CRITICAL FIX] Reset hitStop on death to prevent freezing
         damageFlashRef.current = 1.0;
         SoundManager.play('crash');
 
@@ -1659,8 +1660,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
 
             // --- RENDER DRONE ---
-            // Drone stays visible unless IT is the reason for dying
-            if (!isDying || isCargoDeath) {
+            // Local drone only renders if it has health
+            if (drone.health > 0) {
                 ctx.save(); ctx.translate(drone.pos.x, drone.pos.y); ctx.rotate(drone.angle);
 
                 if (drone.invincibleTimer > 0 || drone.isGodMode) {
@@ -1730,8 +1731,29 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- RENDER REMOTE PLAYERS ---
             if (multiplayer?.isActive) {
                 multiplayer.remotePlayers.forEach(p => {
-                    // Only render alive remote players
-                    if (p.health <= 0) return;
+                    const isDead = p.health <= 0;
+
+                    if (isDead) {
+                        // Render Death X for remote players
+                        const size = 10;
+                        ctx.save();
+                        ctx.translate(p.pos.x, p.pos.y);
+                        ctx.strokeStyle = '#ff0000';
+                        ctx.lineWidth = 3;
+                        ctx.globalAlpha = 0.6;
+                        ctx.beginPath();
+                        ctx.moveTo(-size, -size); ctx.lineTo(size, size);
+                        ctx.moveTo(size, -size); ctx.lineTo(-size, size);
+                        ctx.stroke();
+
+                        // ID text above X
+                        ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+                        ctx.font = '12px VT323';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(p.id.slice(-4), 0, -15);
+                        ctx.restore();
+                        return; // Skip drone rendering for dead players
+                    }
 
                     // Draw Rope & Cargo if available
                     if (p.cargoPos) {
@@ -1785,6 +1807,26 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     ctx.fillText(p.id.slice(-4), 0, -25);
                     ctx.restore();
                 });
+            }
+
+            // --- RENDER LOCAL PLAYER DEATH MARKER ---
+            if (drone.health <= 0 && !isCargoDeath) {
+                const size = 10;
+                ctx.save();
+                ctx.translate(drone.pos.x, drone.pos.y);
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.moveTo(-size, -size); ctx.lineTo(size, size);
+                ctx.moveTo(size, -size); ctx.lineTo(-size, size);
+                ctx.stroke();
+                // "YOU" text above X
+                ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+                ctx.font = '12px VT323';
+                ctx.textAlign = 'center';
+                ctx.fillText("YOU", 0, -15);
+                ctx.restore();
             }
 
             // --- RENDER GHOST ---
