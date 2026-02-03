@@ -574,9 +574,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     const levelData = levelRef.current;
                     const threshold = 5;
 
+                    console.log('[PICKUP_COLLECT] Received:', { pickupType, x, y, coinsCount: levelData.coins.length });
+
                     if (pickupType === 'COIN') {
                         const coin = levelData.coins.find(c => !c.collected && Math.abs(c.x - x) < threshold && Math.abs(c.y - y) < threshold);
-                        if (coin) coin.collected = true;
+                        if (coin) {
+                            coin.collected = true;
+                            console.log('[PICKUP_COLLECT] Coin marked as collected:', { x: coin.x, y: coin.y });
+                        } else {
+                            console.warn('[PICKUP_COLLECT] Coin NOT found at:', { x, y, nearbyCoins: levelData.coins.filter(c => !c.collected && Math.abs(c.x - x) < 50).map(c => ({ x: c.x, y: c.y, collected: c.collected })) });
+                        }
                     } else if (pickupType === 'ORDER') {
                         const order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
                         if (order) order.collected = true;
