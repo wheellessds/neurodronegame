@@ -563,6 +563,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         }
                         t.speed = targetSpeed;
                     }
+
+                    // [MAP SYNC] Fast-forward map generation if we are behind host
+                    // This ensures our RNG state matches the host's, so coins spawn at correct locations
+                    if (event.data.nextGenX && event.data.nextGenX > nextGenX.current) {
+                        const targetGenX = event.data.nextGenX;
+                        // Limit fast-forward to prevent freeze if delta is huge (e.g. join very late)
+                        // But we MUST catch up for RNG to match.
+                        // We'll process in chunks.
+                        let attempts = 0;
+                        while (nextGenX.current < targetGenX && attempts < 500) {
+                            nextGenX.current = generateChunk(nextGenX.current);
+                            attempts++;
+                        }
+                    }
                 } else if (event.data.type === 'GLOBAL_RESTART') {
                     setVedalMessage("HOST INITIATED RESTART!||房主已重啟遊戲！");
                     resetDroneState();
@@ -574,16 +588,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     const levelData = levelRef.current;
                     const threshold = 5;
 
-                    console.log('[PICKUP_COLLECT] Received:', { pickupType, x, y, coinsCount: levelData.coins.length });
-
                     if (pickupType === 'COIN') {
                         const coin = levelData.coins.find(c => !c.collected && Math.abs(c.x - x) < threshold && Math.abs(c.y - y) < threshold);
-                        if (coin) {
-                            coin.collected = true;
-                            console.log('[PICKUP_COLLECT] Coin marked as collected:', { x: coin.x, y: coin.y });
-                        } else {
-                            console.warn('[PICKUP_COLLECT] Coin NOT found at:', { x, y, nearbyCoins: levelData.coins.filter(c => !c.collected && Math.abs(c.x - x) < 50).map(c => ({ x: c.x, y: c.y, collected: c.collected })) });
-                        }
+                        if (coin) coin.collected = true;
                     } else if (pickupType === 'ORDER') {
                         const order = levelData.urgentOrders.find(o => !o.collected && Math.abs(o.x - x) < threshold && Math.abs(o.y - y) < threshold);
                         if (order) order.collected = true;
@@ -591,6 +598,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         const powerup = levelData.powerups.find(p => !p.collected && Math.abs(p.x - x) < threshold && Math.abs(p.y - y) < threshold);
                         if (powerup) powerup.collected = true;
                     }
+                } else if (event.data.type === 'SYNC_MAP_STATE') {
+                    // [MAP SYNC] Sync map generation state from host
+                    nextGenX.current = event.data.nextGenX;
                 }
             }
         };
@@ -631,7 +641,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 train.speed = targetSpeed;
                 // Note: Train X movement is still done in the main loop for the host.
 
-                multiplayer.manager?.broadcast({ type: 'SYNC_ENV', train: { x: train.x, speed: train.speed } });
+                multiplayer.manager?.broadcast({
+                    type: 'SYNC_ENV',
+                    train: { x: train.x, speed: train.speed },
+                    nextGenX: nextGenX.current // [MAP SYNC] Broadcast map generation progress
+                });
             }
         }, 100);
         return () => clearInterval(interval);
