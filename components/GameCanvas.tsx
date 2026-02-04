@@ -1747,7 +1747,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
 
                     // [玩家碰撞] 輕量級碰撞檢測(客戶端本地計算)
-                    if (multiplayer?.isActive && drone.health > 0 && !deathSequenceRef.current) {
+                    // [開局保護] 只有玩家起飛後才啟用碰撞
+                    if (multiplayer?.isActive && drone.health > 0 && !deathSequenceRef.current && hasLaunchedRef.current) {
                         multiplayer.remotePlayers.forEach(rp => {
                             if (rp.health <= 0) return; // 跳過死亡玩家
 
