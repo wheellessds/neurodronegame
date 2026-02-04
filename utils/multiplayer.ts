@@ -17,6 +17,11 @@ export interface RemotePlayer {
     scoreDistance?: number;
     distToNext?: number;
     lastUpdate: number;
+    // [插值優化] 用於平滑移動
+    targetPos?: { x: number, y: number };
+    targetAngle?: number;
+    targetCargoPos?: { x: number, y: number };
+    targetCargoAngle?: number;
 }
 
 export interface MultiplayerState {

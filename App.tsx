@@ -123,6 +123,71 @@ const App: React.FC = () => {
   const multiplayerIdRef = useRef(multiplayerId);
   useEffect(() => { multiplayerIdRef.current = multiplayerId; }, [multiplayerId]);
 
+  // [插值優化] 每幀更新遠程玩家位置,平滑過渡到目標位置
+  useEffect(() => {
+    if (!multiplayerMode) return;
+
+    let animationId: number;
+    const interpolate = () => {
+      setRemotePlayers(prev => {
+        const next = new Map(prev);
+        let hasChanges = false;
+
+        prev.forEach((player, id) => {
+          if (!player.targetPos) return;
+
+          const lerpFactor = 0.3; // 插值速度
+
+          // 位置插值
+          const newX = player.pos.x + (player.targetPos.x - player.pos.x) * lerpFactor;
+          const newY = player.pos.y + (player.targetPos.y - player.pos.y) * lerpFactor;
+
+          // 角度插值
+          let angleDiff = (player.targetAngle || player.angle) - player.angle;
+          if (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+          if (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+          const newAngle = player.angle + angleDiff * lerpFactor;
+
+          // 貨物位置插值
+          let newCargoX = player.cargoPos?.x || 0;
+          let newCargoY = player.cargoPos?.y || 0;
+          if (player.targetCargoPos && player.cargoPos) {
+            newCargoX = player.cargoPos.x + (player.targetCargoPos.x - player.cargoPos.x) * lerpFactor;
+            newCargoY = player.cargoPos.y + (player.targetCargoPos.y - player.cargoPos.y) * lerpFactor;
+          }
+
+          // 貨物角度插值
+          let newCargoAngle = player.cargoAngle || 0;
+          if (player.targetCargoAngle !== undefined && player.cargoAngle !== undefined) {
+            let cargoAngleDiff = player.targetCargoAngle - player.cargoAngle;
+            if (cargoAngleDiff > Math.PI) cargoAngleDiff -= Math.PI * 2;
+            if (cargoAngleDiff < -Math.PI) cargoAngleDiff += Math.PI * 2;
+            newCargoAngle = player.cargoAngle + cargoAngleDiff * lerpFactor;
+          }
+
+          // 檢查是否有變化
+          if (Math.abs(newX - player.pos.x) > 0.01 || Math.abs(newY - player.pos.y) > 0.01) {
+            hasChanges = true;
+            next.set(id, {
+              ...player,
+              pos: { x: newX, y: newY },
+              angle: newAngle,
+              cargoPos: player.cargoPos ? { x: newCargoX, y: newCargoY } : undefined,
+              cargoAngle: newCargoAngle
+            });
+          }
+        });
+
+        return hasChanges ? next : prev;
+      });
+
+      animationId = requestAnimationFrame(interpolate);
+    };
+
+    animationId = requestAnimationFrame(interpolate);
+    return () => cancelAnimationFrame(animationId);
+  }, [multiplayerMode]);
+
   // Custom Controls State
   const [controlsConfig, setControlsConfig] = useState<ControlsConfig>(DEFAULT_CONTROLS);
   const [isLayoutEditing, setIsLayoutEditing] = useState(false);
@@ -233,14 +298,24 @@ const App: React.FC = () => {
 
         setRemotePlayers(prev => {
           const next = new Map(prev);
+          const existing = prev.get(playerId);
+
+          // [插值優化] 將新位置設為目標,而非直接更新
           next.set(playerId, {
             id: playerId,
-            pos: event.data.pos,
-            angle: event.data.angle,
+            // 保持當前位置(如果存在),否則直接設置
+            pos: existing?.pos || event.data.pos,
+            angle: existing?.angle || event.data.angle,
+            cargoPos: existing?.cargoPos || event.data.cargoPos,
+            cargoAngle: existing?.cargoAngle || event.data.cargoAngle,
+            // 設置目標位置
+            targetPos: event.data.pos,
+            targetAngle: event.data.angle,
+            targetCargoPos: event.data.cargoPos,
+            targetCargoAngle: event.data.cargoAngle,
+            // 其他狀態直接更新
             health: event.data.health,
             persona: event.data.persona,
-            cargoPos: event.data.cargoPos,
-            cargoAngle: event.data.cargoAngle,
             thrustPower: event.data.thrustPower,
             // [SPECTATOR SYNC] Store UI stats
             fuel: event.data.fuel,
@@ -1659,7 +1734,7 @@ const App: React.FC = () => {
 
       {/* Version Tag */}
       <div className="absolute bottom-1 left-1 z-[1000] text-[8px] text-white/20 font-mono tracking-tighter select-none pointer-events-none uppercase">
-        Alpha 1.2k
+        Alpha 1.3k
       </div>
     </div >
   );

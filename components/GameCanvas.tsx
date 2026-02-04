@@ -754,7 +754,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     mapGenStartX: mapGenerationStartX.current // [MAP SYNC] Broadcast origin to align RNG
                 });
             }
-        }, 100);
+        }, 200); // [優化] 降低頻率從 100ms 到 200ms (5 次/秒)
         return () => clearInterval(interval);
     }, [multiplayer, gameState]);
 
@@ -1034,12 +1034,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     // Train Logic
                     if (!multiplayer?.isActive || multiplayer?.isHost) {
                         // Autonomous movement for Solo or Host
-                        const distFromTrain = drone.pos.x - train.x;
+                        // [觀戰修復] 使用 targetPos 而非 drone.pos,這樣觀戰時火車也會移動
+                        const distFromTrain = (effectiveIsSpectating ? targetPos.x : drone.pos.x) - train.x;
                         if (!multiplayer?.isActive) {
                             // Solo mode logic (already exists - targeting current drone)
                             if (distFromTrain > 1500) train.speed = 10;
                             else if (distFromTrain > 800) train.speed = 6;
-                            else train.speed = 3.5 + (drone.pos.x / 5000);
+                            else train.speed = 3.5 + ((effectiveIsSpectating ? targetPos.x : drone.pos.x) / 5000);
                         }
                         // Host uses the speed calculated in its effect
                         train.x += train.speed * (dt * 0.6);
@@ -1721,8 +1722,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         mpSyncTimerRef.current += dt;
                         // Low: 4 TPS (15 frames), Med: 10 TPS (6 frames), High: 20 TPS (3 frames)
                         const currentRate = mpUpdateRateRef.current; // Read from ref
-                        // Low: 10 TPS (6 frames), Med: 20 TPS (3 frames), High: 60 TPS (1 frame)
-                        const syncInterval = currentRate === 'low' ? 6 : currentRate === 'med' ? 3 : 1;
+                        // [優化] Low: 10 TPS (6 frames), Med: 15 TPS (4 frames), High: 20 TPS (3 frames)
+                        const syncInterval = currentRate === 'low' ? 6 : currentRate === 'med' ? 4 : 3;
                         if (mpSyncTimerRef.current >= syncInterval) {
                             mpSyncTimerRef.current -= syncInterval; // Maintain accumulation for accurate pacing
                             multiplayer.manager.broadcast({
@@ -1743,6 +1744,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                             });
                             mpSyncTimerRef.current = 0;
                         }
+                    }
+
+                    // [玩家碰撞] 輕量級碰撞檢測(客戶端本地計算)
+                    if (multiplayer?.isActive && drone.health > 0 && !deathSequenceRef.current) {
+                        multiplayer.remotePlayers.forEach(rp => {
+                            if (rp.health <= 0) return; // 跳過死亡玩家
+
+                            const dx = drone.pos.x - rp.pos.x;
+                            const dy = drone.pos.y - rp.pos.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            const minDist = drone.radius + 15; // 遠程玩家半徑
+
+                            if (dist < minDist && dist > 0) {
+                                // 碰撞!產生彈開效果
+                                const overlap = minDist - dist;
+                                const nx = dx / dist; // 法向量
+                                const ny = dy / dist;
+
+                                // 彈開本地玩家
+                                drone.pos.x += nx * overlap * 0.5;
+                                drone.pos.y += ny * overlap * 0.5;
+                                drone.vel.x += nx * 2;
+                                drone.vel.y += ny * 2;
+
+                                // 視覺效果
+                                shakeRef.current = Math.max(shakeRef.current, 5);
+                                SoundManager.play('damage'); // 使用碰撞音效
+
+                                // 粒子效果
+                                for (let i = 0; i < 8; i++) {
+                                    const angle = Math.random() * Math.PI * 2;
+                                    particlesRef.current.push({
+                                        x: (drone.pos.x + rp.pos.x) / 2,
+                                        y: (drone.pos.y + rp.pos.y) / 2,
+                                        vx: Math.cos(angle) * 3,
+                                        vy: Math.sin(angle) * 3,
+                                        life: 1.0,
+                                        color: '#fbbf24' // 金色碰撞火花
+                                    });
+                                }
+                            }
+                        });
                     }
                 }
             }
