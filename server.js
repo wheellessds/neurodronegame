@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,7 +27,6 @@ app.use(express.static(__dirname));
 let activeRooms = {};
 
 // --- 用戶數據與認證 ---
-import crypto from 'crypto';
 const usersPath = path.resolve(__dirname, 'users.json');
 let users = {};
 
@@ -41,7 +41,6 @@ if (fs.existsSync(usersPath)) {
 }
 
 // 簡單的 Session 管理 (In-memory)
-// Token -> { username, expires }
 const sessions = new Map();
 
 function saveUsers() {
@@ -56,6 +55,13 @@ function generateToken() {
     return crypto.randomBytes(32).toString('hex');
 }
 
+const isAdmin = (token) => {
+    const session = sessions.get(token);
+    if (!session || session.expires < Date.now()) return false;
+    const user = users[session.username];
+    return user && user.role === 'admin';
+};
+
 // --- API: 註冊 ---
 app.post('/api/register', (req, res) => {
     const { username, password } = req.body;
@@ -68,17 +74,13 @@ app.post('/api/register', (req, res) => {
     users[username] = {
         hash,
         salt,
-        saveData: {
-            money: 0 // 初始金幣
-        },
+        saveData: { money: 0 },
         joinedAt: Date.now()
     };
     saveUsers();
 
-    // 自動登入
     const token = generateToken();
-    sessions.set(token, { username, expires: Date.now() + 86400000 }); // 24hr
-
+    sessions.set(token, { username, expires: Date.now() + 86400000 });
     res.json({ success: true, token, username, saveData: users[username].saveData });
 });
 
@@ -92,23 +94,18 @@ app.post('/api/login', (req, res) => {
     if (hash !== user.hash) return res.status(400).json({ error: 'Invalid password' });
 
     const token = generateToken();
-    sessions.set(token, { username, expires: Date.now() + 86400000 }); // 24hr
-
-    res.json({ success: true, token, username, saveData: user.saveData });
+    sessions.set(token, { username, expires: Date.now() + 86400000 });
+    res.json({ success: true, token, username, saveData: user.saveData, role: user.role || 'user' });
 });
 
-// --- API: 儲存進度 (僅金幣) ---
+// --- API: 儲存進度 ---
 app.post('/api/save', (req, res) => {
     const { token, saveData } = req.body;
     const session = sessions.get(token);
-
-    if (!session || session.expires < Date.now()) {
-        return res.status(401).json({ error: 'Invalid or expired token' });
-    }
+    if (!session || session.expires < Date.now()) return res.status(401).json({ error: 'Invalid or expired token' });
 
     const { username } = session;
     if (users[username]) {
-        // 只更新金幣，防止修改其他不可變數據
         if (typeof saveData.money === 'number') {
             users[username].saveData.money = saveData.money;
             saveUsers();
@@ -121,29 +118,91 @@ app.post('/api/save', (req, res) => {
     }
 });
 
+// --- API: Token 驗證 ---
+app.post('/api/verify-token', (req, res) => {
+    const { token } = req.body;
+    const session = sessions.get(token);
+    if (session && session.expires > Date.now()) {
+        const u = users[session.username];
+        if (u) {
+            res.json({ success: true, username: session.username, saveData: u.saveData, role: u.role || 'user' });
+        } else {
+            res.status(404).json({ error: 'User not found' });
+        }
+    } else {
+        res.status(401).json({ error: 'Expired or invalid' });
+    }
+});
+
+// --- API: 邀請碼兌換 ---
+app.post('/api/redeem-code', (req, res) => {
+    const { token, code } = req.body;
+    const session = sessions.get(token);
+    if (!session || session.expires < Date.now()) return res.status(401).json({ error: 'Unauthorized' });
+
+    if (code === 'AAA0000') {
+        users[session.username].role = 'admin';
+        saveUsers();
+        res.json({ success: true, role: 'admin' });
+    } else {
+        res.status(400).json({ error: 'Invalid invite code' });
+    }
+});
+
+// --- API: ADMIN ---
+app.post('/api/admin/delete-entry', (req, res) => {
+    const { token, entryIndex } = req.body;
+    if (!isAdmin(token)) return res.status(403).json({ error: 'Forbidden' });
+
+    const leaderboardPath = path.resolve(__dirname, 'leaderboard.json');
+    if (fs.existsSync(leaderboardPath)) {
+        let data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
+        if (entryIndex >= 0 && entryIndex < data.length) {
+            data.splice(entryIndex, 1);
+            fs.writeFileSync(leaderboardPath, JSON.stringify(data, null, 2), 'utf8');
+            return res.json({ success: true });
+        }
+    }
+    res.status(400).json({ error: 'Invalid index or data' });
+});
+
+app.post('/api/admin/list-users', (req, res) => {
+    const { token } = req.body;
+    if (!isAdmin(token)) return res.status(403).json({ error: 'Forbidden' });
+    const userList = Object.keys(users).map(name => ({
+        username: name,
+        joinedAt: users[name].joinedAt || 0,
+        money: users[name].saveData?.money || 0,
+        role: users[name].role || 'user'
+    }));
+    res.json(userList);
+});
+
+app.post('/api/admin/delete-user', (req, res) => {
+    const { token, username } = req.body;
+    if (!isAdmin(token)) return res.status(403).json({ error: 'Forbidden' });
+    if (users[username]) {
+        delete users[username];
+        saveUsers();
+        return res.json({ success: true });
+    }
+    res.status(404).json({ error: 'User not found' });
+});
 
 // --- API: 房間列表 ---
 app.get('/api/rooms', (req, res) => {
     const now = Date.now();
-    // 過濾 10 秒內有活動的房間
     const activeList = Object.values(activeRooms).filter((r) => now - r.lastSeen < 10000);
-
-    // 清理舊房間
     Object.keys(activeRooms).forEach(key => {
         if (now - activeRooms[key].lastSeen > 10000) delete activeRooms[key];
     });
-
     res.json(activeList);
 });
 
-// --- API: 房間心跳/註冊 ---
 app.post('/api/rooms', (req, res) => {
     const data = req.body;
     if (data.id) {
-        activeRooms[data.id] = {
-            ...data,
-            lastSeen: Date.now()
-        };
+        activeRooms[data.id] = { ...data, lastSeen: Date.now() };
         res.json({ success: true });
     } else {
         res.status(400).json({ error: 'Missing ID' });
@@ -151,17 +210,13 @@ app.post('/api/rooms', (req, res) => {
 });
 
 // --- API: 排行榜 ---
-const leaderboardPath = path.resolve(__dirname, 'leaderboard.json');
-
+const lbPath = path.resolve(__dirname, 'leaderboard.json');
 app.get('/api/leaderboard', (req, res) => {
     let data = [];
-    if (fs.existsSync(leaderboardPath)) {
+    if (fs.existsSync(lbPath)) {
         try {
-            const content = fs.readFileSync(leaderboardPath, 'utf8');
-            data = JSON.parse(content);
-        } catch (e) {
-            data = [];
-        }
+            data = JSON.parse(fs.readFileSync(lbPath, 'utf8'));
+        } catch (e) { data = []; }
     }
     res.json(data);
 });
@@ -170,23 +225,14 @@ app.post('/api/leaderboard', (req, res) => {
     try {
         const newEntry = req.body;
         let data = [];
-        if (fs.existsSync(leaderboardPath)) {
-            data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
-        }
+        if (fs.existsSync(lbPath)) data = JSON.parse(fs.readFileSync(lbPath, 'utf8'));
         data.push(newEntry);
-        data.sort((a, b) => {
-            if (b.distance !== a.distance) return b.distance - a.distance;
-            return a.time - b.time;
-        });
-        const limitedData = data.slice(0, 100);
-        fs.writeFileSync(leaderboardPath, JSON.stringify(limitedData, null, 2), 'utf8');
+        data.sort((a, b) => (b.distance !== a.distance) ? (b.distance - a.distance) : (a.time - b.time));
+        fs.writeFileSync(lbPath, JSON.stringify(data.slice(0, 100), null, 2), 'utf8');
         res.json({ success: true });
-    } catch (e) {
-        res.status(400).json({ error: 'Invalid Data' });
-    }
+    } catch (e) { res.status(400).json({ error: 'Invalid Data' }); }
 });
 
-// 所有其他請求返回 index.html (SPA 支持)
 app.use((req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });

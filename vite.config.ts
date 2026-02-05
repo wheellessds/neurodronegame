@@ -11,12 +11,7 @@ const __dirname = path.dirname(__filename);
 const leaderboardStoragePlugin = (): Plugin => ({
   name: 'leaderboard-storage',
   configureServer(server) {
-    // In-memory room storage for simplicity
-    // structure: { id: { name, players, maxPlayers, lastSeen } }
     let activeRooms: Record<string, any> = {};
-
-    // Authenticaion & User Setup
-    // crypto is imported at the top of the file
     const usersPath = path.resolve(__dirname, 'users.json');
     let users: Record<string, any> = {};
 
@@ -42,6 +37,13 @@ const leaderboardStoragePlugin = (): Plugin => ({
       return crypto.randomBytes(32).toString('hex');
     };
 
+    const isAdmin = (token: string) => {
+      const session = sessions.get(token);
+      if (!session || session.expires < Date.now()) return false;
+      const user = users[session.username];
+      return user && user.role === 'admin';
+    };
+
     server.middlewares.use(async (req, res, next) => {
       const url = req.url || '';
 
@@ -53,35 +55,23 @@ const leaderboardStoragePlugin = (): Plugin => ({
           try {
             const { username, password } = JSON.parse(body);
             if (!username || !password) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'Missing fields' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Missing fields' }));
               return;
             }
             if (users[username]) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'User already exists' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'User already exists' }));
               return;
             }
-
             const salt = crypto.randomBytes(16).toString('hex');
             const hash = hashPassword(password, salt);
-
-            users[username] = {
-              hash,
-              salt,
-              saveData: { money: 0 },
-              joinedAt: Date.now()
-            };
+            users[username] = { hash, salt, saveData: { money: 0 }, joinedAt: Date.now() };
             saveUsers();
-
             const token = generateToken();
             sessions.set(token, { username, expires: Date.now() + 86400000 });
-
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ success: true, token, username, saveData: users[username].saveData }));
           } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
           }
         });
         return;
@@ -95,26 +85,20 @@ const leaderboardStoragePlugin = (): Plugin => ({
             const { username, password } = JSON.parse(body);
             const user = users[username];
             if (!user) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'User not found' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'User not found' }));
               return;
             }
-
             const hash = hashPassword(password, user.salt);
             if (hash !== user.hash) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'Invalid password' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid password' }));
               return;
             }
-
             const token = generateToken();
             sessions.set(token, { username, expires: Date.now() + 86400000 });
-
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ success: true, token, username, saveData: user.saveData }));
+            res.end(JSON.stringify({ success: true, token, username, saveData: user.saveData, role: user.role || 'user' }));
           } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
           }
         });
         return;
@@ -127,13 +111,10 @@ const leaderboardStoragePlugin = (): Plugin => ({
           try {
             const { token, saveData } = JSON.parse(body);
             const session = sessions.get(token);
-
             if (!session || session.expires < Date.now()) {
-              res.statusCode = 401;
-              res.end(JSON.stringify({ error: 'Invalid or expired token' }));
+              res.statusCode = 401; res.end(JSON.stringify({ error: 'Invalid or expired token' }));
               return;
             }
-
             const { username } = session;
             if (users[username]) {
               if (typeof saveData.money === 'number') {
@@ -142,16 +123,13 @@ const leaderboardStoragePlugin = (): Plugin => ({
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({ success: true, savedMoney: users[username].saveData.money }));
               } else {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'Invalid money value' }));
+                res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid money value' }));
               }
             } else {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: 'User not found' }));
+              res.statusCode = 404; res.end(JSON.stringify({ error: 'User not found' }));
             }
           } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
           }
         });
         return;
@@ -164,59 +142,150 @@ const leaderboardStoragePlugin = (): Plugin => ({
           try {
             const { token } = JSON.parse(body);
             const session = sessions.get(token);
-            if (!session || session.expires < Date.now()) {
-              res.statusCode = 401;
-              res.end(JSON.stringify({ error: 'Session expired' }));
-              return;
-            }
-            const { username } = session;
-            if (users[username]) {
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true, username, saveData: users[username].saveData }));
+            if (session && session.expires > Date.now()) {
+              const u = users[session.username];
+              if (u) {
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, username: session.username, saveData: u.saveData, role: u.role || 'user' }));
+              } else {
+                res.statusCode = 404; res.end(JSON.stringify({ error: 'User not found' }));
+              }
             } else {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: 'User not found' }));
+              res.statusCode = 401; res.end(JSON.stringify({ error: 'Session expired or invalid' }));
             }
           } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
           }
         });
         return;
       }
 
-      // --- ADMIN & UTILITY API ---
+      if (url === '/api/redeem-code' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, code } = JSON.parse(body);
+            const session = sessions.get(token);
+            if (!session || session.expires < Date.now()) {
+              res.statusCode = 401; res.end(JSON.stringify({ error: 'Unauthorized' }));
+              return;
+            }
+            if (code === 'AAA0000') {
+              users[session.username].role = 'admin';
+              saveUsers();
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true, role: 'admin' }));
+            } else {
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid invite code' }));
+            }
+          } catch (e) {
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Bad Request' }));
+          }
+        });
+        return;
+      }
+
+      // --- ADMIN API ---
       if (url === '/api/check-name' && req.method === 'POST') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
         req.on('end', () => {
           try {
             const { username } = JSON.parse(body);
-            const exists = !!users[username];
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ exists }));
+            res.end(JSON.stringify({ exists: !!users[username] }));
           } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
           }
         });
         return;
       }
 
-      const isAdmin = (token: string) => {
-        const session = sessions.get(token);
-        if (!session || session.expires < Date.now()) return false;
-        return ['Wheel', 'Admin', 'Neuro'].includes(session.username);
-      };
+      if (url === '/api/admin/delete-entry' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, entryIndex } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403; res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            const dataPath = path.resolve(__dirname, 'leaderboard.json');
+            if (fs.existsSync(dataPath)) {
+              let data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+              if (entryIndex >= 0 && entryIndex < data.length) {
+                data.splice(entryIndex, 1);
+                fs.writeFileSync(dataPath, JSON.stringify(data, null, 2), 'utf8');
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true }));
+                return;
+              }
+            }
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid index or data' }));
+          } catch (e) {
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
 
-      // --- ROOM LISTING API (Existing) ---
+      if (url === '/api/admin/list-users' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403; res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            const userList = Object.keys(users).map(name => ({
+              username: name,
+              joinedAt: users[name].joinedAt || 0,
+              money: users[name].saveData?.money || 0,
+              role: users[name].role || 'user'
+            }));
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(userList));
+          } catch (e) {
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/admin/delete-user' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, username } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403; res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            if (users[username]) {
+              delete users[username];
+              saveUsers();
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true }));
+            } else {
+              res.statusCode = 404; res.end(JSON.stringify({ error: 'User not found' }));
+            }
+          } catch (e) {
+            res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      // --- ROOMS API ---
       if (url.startsWith('/api/rooms')) {
         if (req.method === 'GET') {
           const now = Date.now();
           const activeList = Object.values(activeRooms).filter((r: any) => now - r.lastSeen < 10000);
-          Object.keys(activeRooms).forEach(key => {
-            if (now - activeRooms[key].lastSeen > 10000) delete activeRooms[key];
-          });
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(activeList));
           return;
@@ -232,12 +301,10 @@ const leaderboardStoragePlugin = (): Plugin => ({
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({ success: true }));
               } else {
-                res.statusCode = 400;
-                res.end(JSON.stringify({ error: 'Missing ID' }));
+                res.statusCode = 400; res.end(JSON.stringify({ error: 'Missing ID' }));
               }
             } catch (e) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'Invalid JSON' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' }));
             }
           });
           return;
@@ -245,14 +312,11 @@ const leaderboardStoragePlugin = (): Plugin => ({
       }
 
       // --- LEADERBOARD API ---
-      const leaderboardPath = path.resolve(__dirname, 'leaderboard.json');
-
+      const lbPath = path.resolve(__dirname, 'leaderboard.json');
       if (url.startsWith('/api/leaderboard')) {
         if (req.method === 'GET') {
           let data = [];
-          if (fs.existsSync(leaderboardPath)) {
-            data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
-          }
+          if (fs.existsSync(lbPath)) data = JSON.parse(fs.readFileSync(lbPath, 'utf8'));
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(data));
           return;
@@ -264,112 +328,18 @@ const leaderboardStoragePlugin = (): Plugin => ({
             try {
               const newEntry = JSON.parse(body);
               let data = [];
-              if (fs.existsSync(leaderboardPath)) {
-                data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
-              }
+              if (fs.existsSync(lbPath)) data = JSON.parse(fs.readFileSync(lbPath, 'utf8'));
               data.push(newEntry);
-              data.sort((a: any, b: any) => {
-                if (b.distance !== a.distance) return b.distance - a.distance;
-                return a.time - b.time;
-              });
-              const limitedData = data.slice(0, 100);
-              fs.writeFileSync(leaderboardPath, JSON.stringify(limitedData, null, 2), 'utf8');
+              data.sort((a: any, b: any) => (b.distance !== a.distance) ? (b.distance - a.distance) : (a.time - b.time));
+              fs.writeFileSync(lbPath, JSON.stringify(data.slice(0, 100), null, 2), 'utf8');
               res.setHeader('Content-Type', 'application/json');
               res.end(JSON.stringify({ success: true }));
             } catch (e) {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'Invalid JSON' }));
+              res.statusCode = 400; res.end(JSON.stringify({ error: 'Invalid JSON' }));
             }
           });
           return;
         }
-      }
-
-      if (url === '/api/admin/delete-entry' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const { token, entryIndex } = JSON.parse(body);
-            if (!isAdmin(token)) {
-              res.statusCode = 403;
-              res.end(JSON.stringify({ error: 'Forbidden' }));
-              return;
-            }
-            let data = [];
-            if (fs.existsSync(leaderboardPath)) {
-              data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
-            }
-            if (entryIndex >= 0 && entryIndex < data.length) {
-              data.splice(entryIndex, 1);
-              fs.writeFileSync(leaderboardPath, JSON.stringify(data, null, 2), 'utf8');
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true }));
-            } else {
-              res.statusCode = 400;
-              res.end(JSON.stringify({ error: 'Invalid index' }));
-            }
-          } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
-          }
-        });
-        return;
-      }
-
-      if (url === '/api/admin/list-users' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const { token } = JSON.parse(body);
-            if (!isAdmin(token)) {
-              res.statusCode = 403;
-              res.end(JSON.stringify({ error: 'Forbidden' }));
-              return;
-            }
-            // Return simplified user objects
-            const userList = Object.keys(users).map(name => ({
-              username: name,
-              joinedAt: users[name].joinedAt || 0,
-              money: users[name].saveData?.money || 0
-            }));
-            res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(userList));
-          } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
-          }
-        });
-        return;
-      }
-
-      if (url === '/api/admin/delete-user' && req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
-          try {
-            const { token, username } = JSON.parse(body);
-            if (!isAdmin(token)) {
-              res.statusCode = 403;
-              res.end(JSON.stringify({ error: 'Forbidden' }));
-              return;
-            }
-            if (users[username]) {
-              delete users[username];
-              saveUsers();
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify({ success: true }));
-            } else {
-              res.statusCode = 404;
-              res.end(JSON.stringify({ error: 'User not found' }));
-            }
-          } catch (e) {
-            res.statusCode = 400;
-            res.end(JSON.stringify({ error: 'Invalid Request' }));
-          }
-        });
-        return;
       }
 
       next();
@@ -380,20 +350,12 @@ const leaderboardStoragePlugin = (): Plugin => ({
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
-    server: {
-      port: 3000,
-      host: '0.0.0.0',
-      allowedHosts: true,
-    },
+    server: { port: 3000, host: '0.0.0.0', allowedHosts: true },
     plugins: [react(), leaderboardStoragePlugin()],
     define: {
       'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || '')
     },
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      }
-    }
+    resolve: { alias: { '@': path.resolve(__dirname, '.') } }
   };
 });

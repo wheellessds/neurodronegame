@@ -148,10 +148,10 @@ const App: React.FC = () => {
         .then(res => res.json())
         .then(u => {
           if (u.success) {
-            setUser({ token: savedToken, username: u.username, saveData: u.saveData });
+            setUser({ token: savedToken, username: u.username, saveData: u.saveData, role: u.role });
             setMoney(u.saveData.money);
             setPlayerName(u.username);
-            setIsAdmin(['Wheel', 'Admin', 'Neuro'].includes(u.username));
+            setIsAdmin(u.role === 'admin');
             setNameError(null);
             setShowLogin(false); // Hide login modal if auto-logged in
           } else {
@@ -237,7 +237,7 @@ const App: React.FC = () => {
   const [currentCargoTrajectory, setCurrentCargoTrajectory] = useState<{ x: number, y: number }[]>([]);
 
   // Game Over Action
-  const [postScoreAction, setPostScoreAction] = useState<'NONE' | 'SAVING' | 'SAVED'>('NONE');
+  const [postScoreAction, setPostScoreAction] = useState<'NONE' | 'SAVING' | 'SAVED' | null>('NONE');
 
   // Upgrades & Inventory
   const [upgrades, setUpgrades] = useState<UpgradeStats>({
@@ -830,6 +830,29 @@ const App: React.FC = () => {
     }
   }, [gameState, multiplayerMode, lastCheckpoint.x, isPermanentlyDead]);
 
+  const handleRedeemCode = (code: string) => {
+    if (!user) return;
+    fetch('/api/redeem-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: user.token, code })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setIsAdmin(true);
+          setUser({ ...user, role: 'admin' });
+          setVedalMessage("邀請碼兌換成功！已獲得管理員權限。");
+        } else {
+          setVedalMessage(`兌換失敗：${data.error}`);
+        }
+      })
+      .catch(e => {
+        console.error("Redeem failed", e);
+        setVedalMessage("兌換失敗：連線異常。");
+      });
+  };
+
   const saveToLeaderboard = async (name: string, distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[]) => {
     const entry: LeaderboardEntry = {
       name, distance, time, date: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-'),
@@ -1380,6 +1403,7 @@ const App: React.FC = () => {
                   .then(res => res.json())
                   .then(setLeaderboard);
               }}
+              onRedeemCode={handleRedeemCode}
             />
           </div>
         </div>
@@ -1393,7 +1417,7 @@ const App: React.FC = () => {
             setMoney(u.saveData.money);
             setShowLogin(false);
             setPlayerName(u.username); // 使用登录名作为玩家名
-            setIsAdmin(['Wheel', 'Admin', 'Neuro'].includes(u.username));
+            setIsAdmin(u.role === 'admin');
             setNameError(null);
             localStorage.setItem('neuro_drone_token', u.token);
             localStorage.setItem('neuro_drone_name', u.username);
@@ -1932,6 +1956,7 @@ const App: React.FC = () => {
         nameError={nameError}
         vedalMessage={vedalMessage}
         onLogout={handleLogout}
+        onRedeemCode={handleRedeemCode}
       />
 
       {
@@ -2000,9 +2025,9 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Version Tag (超小字) */}
-      <div className="absolute bottom-1 left-1 z-[1000] text-[8px] text-white/10 select-none pointer-events-none font-sans uppercase tracking-tighter">
-        Alpha 1.4g (TC)
+      {/* Version Number */}
+      <div className="absolute bottom-1 left-1 z-[200] text-[8px] font-bold text-slate-500 pointer-events-none select-none opacity-50 font-sans tracking-tighter">
+        Alpha 1.4h (TC)
       </div>
     </div >
   );

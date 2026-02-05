@@ -40,6 +40,7 @@ interface SettingsOverlayProps {
     nameError?: string | null;
     vedalMessage?: string;
     onLogout?: () => void;
+    onRedeemCode?: (code: string) => void;
 }
 
 export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
@@ -70,11 +71,13 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     isLoggedIn,
     nameError,
     vedalMessage,
-    onLogout
+    onLogout,
+    onRedeemCode
 }) => {
     const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>(initialTab || 'general');
     const [bindingKey, setBindingKey] = useState<keyof ControlsConfig['keys'] | null>(null);
     const [localSeed, setLocalSeed] = useState(currentSeed || '');
+    const [inviteCode, setInviteCode] = useState('');
 
     // Sync seed when prop changes
     useEffect(() => {
@@ -151,7 +154,36 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                             </SettingItem>
 
                             {isLoggedIn && (
-                                <div className="pt-4 border-t border-red-900/30">
+                                <div className="pt-4 border-t border-slate-700/50 space-y-4">
+                                    {!isAdmin && (
+                                        <div className="bg-slate-800/50 p-3 rounded-lg border border-cyan-900/50">
+                                            <label className="text-cyan-400 font-bold text-xs mb-2 block tracking-widest flex items-center gap-1">
+                                                INVITATION CODE (邀請碼)
+                                                <InfoTooltip text="輸入特定邀請碼以獲得最高管理權限。" />
+                                            </label>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    type="text"
+                                                    value={inviteCode}
+                                                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                                                    placeholder="ENTER CODE..."
+                                                    className="flex-1 bg-black/50 border border-slate-600 rounded px-2 py-1 text-cyan-400 font-mono text-sm outline-none focus:border-cyan-500 transition-colors"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        if (inviteCode) {
+                                                            onRedeemCode?.(inviteCode);
+                                                            setInviteCode('');
+                                                        }
+                                                    }}
+                                                    className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-4 py-1 rounded text-xs transition-all active:scale-95"
+                                                >
+                                                    REDEEM (兌換)
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     <button
                                         onClick={() => {
                                             if (confirm("確定要登出系統嗎？")) {

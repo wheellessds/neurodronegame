@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 leaderboard.json
 leaderboard.json.bak
+users.json
+users.json.bak
