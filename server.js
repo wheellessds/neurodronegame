@@ -74,7 +74,7 @@ app.post('/api/register', (req, res) => {
     users[username] = {
         hash,
         salt,
-        saveData: { money: 0 },
+        saveData: { money: 0, diamonds: 0 },
         joinedAt: Date.now()
     };
     saveUsers();
@@ -108,8 +108,11 @@ app.post('/api/save', (req, res) => {
     if (users[username]) {
         if (typeof saveData.money === 'number') {
             users[username].saveData.money = saveData.money;
+            if (typeof saveData.diamonds === 'number') {
+                users[username].saveData.diamonds = saveData.diamonds;
+            }
             saveUsers();
-            res.json({ success: true, savedMoney: users[username].saveData.money });
+            res.json({ success: true, savedMoney: users[username].saveData.money, savedDiamonds: users[username].saveData.diamonds });
         } else {
             res.status(400).json({ error: 'Invalid money value' });
         }

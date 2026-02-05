@@ -133,6 +133,7 @@ export interface UpgradeStats {
   cableLevel: number;
   cargoLevel: number; // New upgrade
   money: number;
+  diamonds: number;
 }
 
 export interface InputState {

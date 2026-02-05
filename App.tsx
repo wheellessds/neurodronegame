@@ -54,6 +54,7 @@ const App: React.FC = () => {
   const [persona, setPersona] = useState<Persona>(Persona.NEURO);
   const [difficulty, setDifficulty] = useState<'NORMAL' | 'EASY'>('NORMAL');
   const [money, setMoney] = useState(INITIAL_MONEY);
+  const [diamonds, setDiamonds] = useState(0);
   const [gameKey, setGameKey] = useState(0);
   const [respawnToken, setRespawnToken] = useState(0);
   const [highScore, setHighScore] = useState(0);
@@ -70,7 +71,7 @@ const App: React.FC = () => {
   // ...
 
   // [NEW] Save Game Function
-  const saveGame = useCallback(async (currentMoney: number) => {
+  const saveGame = useCallback(async (currentMoney: number, currentDiamonds?: number) => {
     if (!user) return;
     try {
       await fetch('/api/save', {
@@ -78,13 +79,16 @@ const App: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: user.token,
-          saveData: { money: currentMoney }
+          saveData: {
+            money: currentMoney,
+            diamonds: typeof currentDiamonds === 'number' ? currentDiamonds : diamonds
+          }
         })
       });
     } catch (e) {
       console.error("Auto-save failed", e);
     }
-  }, [user]);
+  }, [user, diamonds]);
 
   // [NEW] 当 dinero 改变时，防抖保存 (这里简化为在关键节点保存，防止频繁请求)
   // 目前策略：Game Over / Shop Close 时保存。但为了通过测试，我们在 setMoney 处不直接保存，而是单独调用。
@@ -150,6 +154,7 @@ const App: React.FC = () => {
           if (u.success) {
             setUser({ token: savedToken, username: u.username, saveData: u.saveData, role: u.role });
             setMoney(u.saveData.money);
+            setDiamonds(u.saveData.diamonds || 0);
             setPlayerName(u.username);
             setIsAdmin(u.role === 'admin');
             setNameError(null);
@@ -1415,6 +1420,7 @@ const App: React.FC = () => {
           onLogin={(u) => {
             setUser(u);
             setMoney(u.saveData.money);
+            setDiamonds(u.saveData.diamonds || 0);
             setShowLogin(false);
             setPlayerName(u.username); // 使用登录名作为玩家名
             setIsAdmin(u.role === 'admin');
@@ -1683,6 +1689,28 @@ const App: React.FC = () => {
                 <div className="relative group flex items-center">
                   <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">緊急維修 $20</button>
                   <InfoTooltip text="修復無人機機身損害。血量歸零將導致配送失敗。" position="bottom" />
+                </div>
+                <div className="relative group flex items-center">
+                  <button
+                    onClick={() => {
+                      if (money >= 1000) {
+                        const newMoney = money - 1000;
+                        const newDiamonds = diamonds + 1;
+                        setMoney(newMoney);
+                        setDiamonds(newDiamonds);
+                        saveGame(newMoney, newDiamonds);
+                        SoundManager.play('coin'); // 使用現有音效
+                        setVedalMessage("成功兌換 1 顆鑽石！💎");
+                      } else {
+                        setVedalMessage("金幣不足 1000，無法兌換鑽石。");
+                      }
+                    }}
+                    className={`bg-cyan-600 text-cyan-100 p-4 rounded-lg w-32 border-2 border-cyan-400 font-bold flex flex-col items-center justify-center gap-1 ${money < 1000 ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:bg-cyan-500'}`}
+                  >
+                    <span>兌換鑽石</span>
+                    <span className="text-[10px]">$1000 → 💎1</span>
+                  </button>
+                  <InfoTooltip text="將 1000 金幣壓縮成 1 顆鑽石。鑽石是永久保存的高級貨幣，可用於後續特殊升級。" position="bottom" />
                 </div>
                 <div className="relative group flex items-center">
                   <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">升級工坊</button>
@@ -2014,8 +2042,8 @@ const App: React.FC = () => {
         )
       }
 
-      {/* 全域金幣顯示 (Global Money Badge) */}
-      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex flex-col items-end">
+      {/* 全域貨幣顯示 (Global Currency Badge) */}
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex flex-col items-end gap-2">
         <div className="bg-slate-900/90 border-2 border-yellow-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
           <span className="text-2xl animate-pulse">💰</span>
           <div className="flex flex-col">
@@ -2023,11 +2051,20 @@ const App: React.FC = () => {
             <span className="text-2xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
           </div>
         </div>
+        {(diamonds > 0 || isAdmin) && (
+          <div className="bg-slate-900/90 border-2 border-cyan-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
+            <span className="text-2xl animate-bounce">💎</span>
+            <div className="flex flex-col">
+              <span className="text-[10px] text-cyan-500/70 font-bold leading-none uppercase tracking-widest">Diamonds</span>
+              <span className="text-2xl font-bold text-cyan-400 font-vt323 leading-tight">{diamonds.toLocaleString()}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Version Number */}
       <div className="absolute bottom-1 left-1 z-[200] text-[8px] font-bold text-slate-500 pointer-events-none select-none opacity-50 font-sans tracking-tighter">
-        Alpha 1.4h (TC)
+        Alpha 1.4i (TC)
       </div>
     </div >
   );
