@@ -63,6 +63,7 @@ const App: React.FC = () => {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [pendingScore, setPendingScore] = useState<{ distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name?: string } | null>(null);
+  const [showSaveModal, setShowSaveModal] = useState(false); // [UX] Manual trigger for save modal
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
 
@@ -884,6 +885,7 @@ const App: React.FC = () => {
       setLeaderboard(data);
       setHighScore(prev => Math.max(prev, distance));
       setPendingScore(null);
+      setShowSaveModal(false);
 
       if (postScoreAction === 'RESTART') handleRestartFull();
       else if (postScoreAction === 'MENU') {
@@ -908,6 +910,7 @@ const App: React.FC = () => {
       const dist = finalDistance || displayStats.distance;
       const time = gameTime;
       setPostScoreAction('MENU');
+      setShowSaveModal(true); // Manually returning to menu triggers save modal immediately
       setPendingScore({
         distance: dist,
         time: time,
@@ -1644,8 +1647,9 @@ const App: React.FC = () => {
         )
       }
 
+
       {
-        pendingScore && (
+        pendingScore && showSaveModal && (
           <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-md pointer-events-auto p-4">
             <div className={`bg-slate-800 border-4 border-cyan-500 p-8 rounded-xl shadow-2xl max-w-sm w-full animate-bounce-short`}>
               <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ 新紀錄 ⭐</h2>
@@ -1665,6 +1669,7 @@ const App: React.FC = () => {
                 <button onClick={() => saveToLeaderboard(pendingScore.name || playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">保存</button>
                 <button onClick={() => {
                   setPendingScore(null);
+                  setShowSaveModal(false);
                   if (postScoreAction === 'RESTART') handleRestartFull();
                   else if (postScoreAction === 'MENU') {
                     setShowSettings(false);
@@ -1781,7 +1786,12 @@ const App: React.FC = () => {
               {!multiplayerMode ? (
                 <>
                   <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">重生 (繼續)</button>
-                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore({ distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
+                  {pendingScore && !showSaveModal && (
+                    <button onClick={() => setShowSaveModal(true)} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95 animate-pulse">
+                      紀錄成績
+                    </button>
+                  )}
+                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore(prev => prev ? prev : { distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
                 </>
               ) : (
                 <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">觀戰</button>
@@ -2115,7 +2125,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4p (TC)
+        Alpha 1.4q (TC)
       </div>
     </div >
   );
