@@ -890,7 +890,7 @@ const App: React.FC = () => {
       setPendingScore(null);
       setShowSaveModal(false);
 
-      if (postScoreAction === 'RESTART') handleRestartFull();
+      if (postScoreAction === 'RESTART') handleStart();
       else if (postScoreAction === 'MENU') {
         setShowSettings(false);
         setGameState(GameState.MENU);
@@ -1686,7 +1686,7 @@ const App: React.FC = () => {
                 <button onClick={() => {
                   setPendingScore(null);
                   setShowSaveModal(false);
-                  if (postScoreAction === 'RESTART') handleRestartFull();
+                  if (postScoreAction === 'RESTART') handleStart();
                   else if (postScoreAction === 'MENU') {
                     setShowSettings(false);
                     setGameState(GameState.MENU);
@@ -2136,7 +2136,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4r (TC)
+        Alpha 1.4s (TC)
       </div>
     </div >
   );
