@@ -829,7 +829,10 @@ const App: React.FC = () => {
     setCurrentTrajectory([]);
     setCurrentCargoTrajectory([]);
     setIsSpectating(false);
+    setCurrentCargoTrajectory([]);
+    setIsSpectating(false);
     setShowSettings(false); // Force close settings
+    setShowSaveModal(false); // [FIX] Ensure save modal is closed on start
   };
 
   const setStats = useCallback((hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number, trainX?: number) => {
@@ -939,7 +942,10 @@ const App: React.FC = () => {
     setRespawnToken(t => t + 1);
     setGameState(GameState.PLAYING);
     setUrgentOrderProgress(null);
+    setGameState(GameState.PLAYING);
+    setUrgentOrderProgress(null);
     setIsSpectating(false);
+    setShowSaveModal(false); // [FIX] Ensure save modal is closed on respawn
   }, [isPermanentlyDead, multiplayerMode]);
 
   const handleCrash = useCallback((reason: string, finalDist: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], trainX?: number) => {
@@ -969,6 +975,7 @@ const App: React.FC = () => {
 
     SoundManager.play('crash');
     setGameState(GameState.GAME_OVER);
+    setShowSaveModal(false); // [FIX] Ensure modal doesn't pop up automatically
     if (multiplayerMode) setIsSpectating(true); // 死亡后自动开启观战
     setFinalDistance(finalDist);
     const penalty = 50;
