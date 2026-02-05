@@ -2051,28 +2051,28 @@ const App: React.FC = () => {
       }
 
       {/* 全域貨幣顯示 (Global Currency Badge) */}
-      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-2">
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-1.5 scale-90 origin-right">
         {(diamonds > 0 || isAdmin) && (
-          <div className="bg-slate-900/90 border-2 border-cyan-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
-            <span className="text-2xl animate-bounce">💎</span>
+          <div className="bg-slate-900/90 border border-cyan-500/50 px-3 py-1.5 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1.5 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
+            <span className="text-xl">💎</span>
             <div className="flex flex-col">
-              <span className="text-[10px] text-cyan-500/70 font-bold leading-none uppercase tracking-widest">Diamonds</span>
-              <span className="text-2xl font-bold text-cyan-400 font-vt323 leading-tight">{diamonds.toLocaleString()}</span>
+              <span className="text-[8px] text-cyan-500/70 font-bold leading-none uppercase tracking-tighter">Diamonds</span>
+              <span className="text-xl font-bold text-cyan-400 font-vt323 leading-tight">{diamonds.toLocaleString()}</span>
             </div>
           </div>
         )}
-        <div className="bg-slate-900/90 border-2 border-yellow-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
-          <span className="text-2xl animate-pulse">💰</span>
+        <div className="bg-slate-900/90 border border-yellow-500/50 px-3 py-1.5 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1.5 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
+          <span className="text-xl">💰</span>
           <div className="flex flex-col">
-            <span className="text-[10px] text-yellow-500/70 font-bold leading-none uppercase tracking-widest">Balance</span>
-            <span className="text-2xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
+            <span className="text-[8px] text-yellow-500/70 font-bold leading-none uppercase tracking-tighter">Balance</span>
+            <span className="text-xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4j (TC)
+        Alpha 1.4k (TC)
       </div>
     </div >
   );
