@@ -115,7 +115,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatu
 
                     <div className="flex flex-col items-end gap-1">
                         {isMobile && (
-                            <div className="flex flex-col gap-1 w-24">
+                            <div className="flex flex-col gap-1 w-24 mt-12">
                                 <CompactBar label="FUEL" val={stats.fuel} color="bg-blue-500" />
                                 <CompactBar label="HULL" val={stats.hp} color="bg-red-500" />
                                 <CompactBar label="RUM" val={stats.cargoHp} color="bg-orange-500" />

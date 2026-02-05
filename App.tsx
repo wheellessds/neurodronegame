@@ -62,7 +62,7 @@ const App: React.FC = () => {
   const [finalDistance, setFinalDistance] = useState(0);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const [pendingScore, setPendingScore] = useState<{ distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[] } | null>(null);
+  const [pendingScore, setPendingScore] = useState<{ distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name?: string } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
 
@@ -113,6 +113,12 @@ const App: React.FC = () => {
   const [roomParticipants, setRoomParticipants] = useState<{ id: string, name: string }[]>([]);
 
   const handleUpdateName = useCallback(async (name: string) => {
+    // [LOCK] 登入後或死亡待存檔期間，禁止修改名稱
+    if (user?.username || pendingScore) {
+      setVedalMessage(user?.username ? "已登入帳號，無法修改名稱。" : "成績結算中，無法修改名稱。");
+      return;
+    }
+
     setPlayerName(name);
     localStorage.setItem('neuro_drone_name', name);
     setNameError(null);
@@ -134,7 +140,7 @@ const App: React.FC = () => {
         console.error("Name check failed", e);
       }
     }
-  }, [user]);
+  }, [user, pendingScore]);
 
   const [showAdmin, setShowAdmin] = useState(false);
 
@@ -896,7 +902,8 @@ const App: React.FC = () => {
         distance: dist,
         time: time,
         trajectory: (window as any).gameRefs?.currentTrajectory || currentTrajectory,
-        cargoTrajectory: (window as any).gameRefs?.currentCargoTrajectory || currentCargoTrajectory
+        cargoTrajectory: (window as any).gameRefs?.currentCargoTrajectory || currentCargoTrajectory,
+        name: playerName // [LOCK] Capture current name at moment of death
       });
     } else {
       setShowSettings(false);
@@ -1135,6 +1142,11 @@ const App: React.FC = () => {
             <div className="text-center mb-6 border-b border-slate-600 pb-4 cursor-pointer hover:bg-slate-700/30 rounded-lg p-2 transition-all active:scale-95 group relative" onClick={() => setShowLeaderboard(true)}>
               <span className="text-cyan-500 font-bold text-lg tracking-widest group-hover:text-cyan-400">🏆 最遠飛行紀錄 🏆</span>
               <div className="text-5xl text-white font-mono mt-2">{highScore}m</div>
+              {leaderboard.length > 0 && (
+                <div className="text-[10px] text-cyan-400/60 mt-2 font-mono italic">
+                  當前榜一: {leaderboard[0].name} ({leaderboard[0].distance}m)
+                </div>
+              )}
               {isMultiplayerHost && mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
                 <div
                   onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
@@ -1144,13 +1156,6 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-
-            <button
-              onClick={() => setShowLeaderboard(true)}
-              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 mb-4"
-            >
-              📊 排行榜 (Leaderboard)
-            </button>
 
             {/* Nickname Input moved here */}
             <div className="flex flex-col gap-1 mb-4">
@@ -1164,9 +1169,12 @@ const App: React.FC = () => {
                   placeholder="輸入暱稱..."
                   value={playerName}
                   onChange={(e) => handleUpdateName(e.target.value.slice(0, 12))}
-                  disabled={!!user}
-                  className={`flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono ${!!user ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  disabled={!!user || !!pendingScore}
+                  className={`flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono ${(!!user || !!pendingScore) ? 'opacity-50 cursor-not-allowed' : ''}`}
                 />
+                {(!!user || !!pendingScore) && (
+                  <span className="text-slate-500 text-xs animate-pulse" title="名稱已鎖定">🔒</span>
+                )}
               </div>
               {nameError && (
                 <div className="text-red-500 text-[10px] font-bold animate-pulse px-3">
@@ -1617,9 +1625,20 @@ const App: React.FC = () => {
           <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-md pointer-events-auto p-4">
             <div className={`bg-slate-800 border-4 border-cyan-500 p-8 rounded-xl shadow-2xl max-w-sm w-full animate-bounce-short`}>
               <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ 新紀錄 ⭐</h2>
-              <input autoFocus type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value.slice(0, 12))} placeholder="輸入名字..." className="w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold mb-4 outline-none focus:border-cyan-500" />
+              <div className="relative mb-4">
+                <input
+                  autoFocus={!pendingScore.name}
+                  type="text"
+                  value={playerName}
+                  onChange={(e) => !pendingScore.name && setPlayerName(e.target.value.slice(0, 12))}
+                  placeholder="輸入名字..."
+                  disabled={!!pendingScore.name}
+                  className={`w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold outline-none focus:border-cyan-500 ${!!pendingScore.name ? 'opacity-60 cursor-not-allowed' : ''}`}
+                />
+                {!!pendingScore.name && <span className="absolute right-3 top-3 text-slate-500">🔒</span>}
+              </div>
               <div className="flex gap-2">
-                <button onClick={() => saveToLeaderboard(playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">保存</button>
+                <button onClick={() => saveToLeaderboard(pendingScore.name || playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">保存</button>
                 <button onClick={() => {
                   setPendingScore(null);
                   if (postScoreAction === 'RESTART') handleRestartFull();
@@ -2051,7 +2070,7 @@ const App: React.FC = () => {
       }
 
       {/* 全域貨幣顯示 (Global Currency Badge) */}
-      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-1.5 scale-90 origin-right">
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-1.5 scale-90 origin-right transition-all duration-500">
         {(diamonds > 0 || isAdmin) && (
           <div className="bg-slate-900/90 border border-cyan-500/50 px-3 py-1.5 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1.5 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
             <span className="text-xl">💎</span>
@@ -2072,7 +2091,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4k (TC)
+        Alpha 1.4o (TC)
       </div>
     </div >
   );
