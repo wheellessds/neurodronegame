@@ -195,7 +195,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     // Expose refs
     // Expose refs
     useEffect(() => {
-        (window as any).gameRefs = { drone: droneRef.current, cargo: cargoRef.current };
+        (window as any).gameRefs = {
+            drone: droneRef.current,
+            cargo: cargoRef.current,
+            // [FIX] Expose trajectory as a dynamic getter to ensure we always get the latest array reference
+            get currentTrajectory() { return trajectoryRef.current; },
+            get currentCargoTrajectory() { return cargoTrajectoryRef.current; }
+        };
     }, [gameState]);
 
 

@@ -114,7 +114,7 @@ const App: React.FC = () => {
 
   const handleUpdateName = useCallback(async (name: string) => {
     // [LOCK] 登入後或死亡待存檔期間，禁止修改名稱
-    if (user?.username || pendingScore) {
+    if (user?.username || (pendingScore && pendingScore.name)) {
       setVedalMessage(user?.username ? "已登入帳號，無法修改名稱。" : "成績結算中，無法修改名稱。");
       return;
     }
@@ -787,6 +787,8 @@ const App: React.FC = () => {
       setIsChallengingSeed(false);
       setGhostData(null);
     } else {
+      // [FIX] Ensure a seed is generated when starting from MENU
+      setCurrentSeed(Math.random().toString(36).substring(2, 9).toUpperCase());
       setIsChallengingSeed(false);
       setGhostData(null);
     }
@@ -865,6 +867,7 @@ const App: React.FC = () => {
   };
 
   const saveToLeaderboard = async (name: string, distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[]) => {
+    console.log(`[Leaderboard] Saving score for ${name}. Trajectory length: ${trajectory?.length || 0}`);
     const entry: LeaderboardEntry = {
       name, distance, time, date: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-'),
       persona, difficulty, isMobile: isMobileMode, seed: currentSeed, trajectory, cargoTrajectory
@@ -2091,7 +2094,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4o (TC)
+        Alpha 1.4p (TC)
       </div>
     </div >
   );
