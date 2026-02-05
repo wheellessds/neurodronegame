@@ -896,6 +896,13 @@ const App: React.FC = () => {
     }
   };
 
+  // Game Over Effect (Simplified - removed pendingScore logic)
+  useEffect(() => {
+    if (gameState === GameState.GAME_OVER && !multiplayerMode) {
+      // 检查是否打破记录 (Logic moved to handleCrash to fix Ghost race condition)
+    }
+  }, [gameState, multiplayerMode]);
+
   const handleBackToMenu = () => {
     if (finalDistance > 0 || displayStats.distance > 0) {
       const dist = finalDistance || displayStats.distance;
@@ -989,6 +996,20 @@ const App: React.FC = () => {
     if (finalDist > highScore) setHighScore(finalDist);
     setCurrentTrajectory(trajectory || []);
     setCurrentCargoTrajectory(cargoTrajectory || []);
+
+    // [FIX] Directly set pending score here to avoid race conditions with useEffect
+    if (!multiplayerMode) {
+      if (finalDist > highScore || (leaderboard.length < 100 || finalDist > leaderboard[leaderboard.length - 1].distance)) {
+        setPostScoreAction(null);
+        setPendingScore({
+          distance: finalDist,
+          time: gameTime,
+          trajectory: trajectory || [],
+          cargoTrajectory: cargoTrajectory || [],
+          name: playerName // [LOCK] Capture current name at moment of death
+        });
+      }
+    }
 
     // Multiplayer: Broadcast death and update room leaderboard
     if (multiplayerMode && mpManagerRef.current) {
