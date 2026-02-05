@@ -1103,7 +1103,16 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRestartFull = () => handleStart();
+  const handleRestartFull = () => {
+    // [UX] Intercept restart if there is a pending high score
+    if (pendingScore && !multiplayerMode) {
+      setPostScoreAction('RESTART');
+      setShowSaveModal(true);
+      return;
+    }
+    handleStart();
+  };
+
 
   const handleBuyRefuel = () => {
     if (money >= 10) {
@@ -1786,12 +1795,7 @@ const App: React.FC = () => {
               {!multiplayerMode ? (
                 <>
                   <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">重生 (繼續)</button>
-                  {pendingScore && !showSaveModal && (
-                    <button onClick={() => setShowSaveModal(true)} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95 animate-pulse">
-                      紀錄成績
-                    </button>
-                  )}
-                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore(prev => prev ? prev : { distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
+                  <button onClick={handleRestartFull} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
                 </>
               ) : (
                 <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">觀戰</button>
@@ -2125,7 +2129,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4q (TC)
+        Alpha 1.4r (TC)
       </div>
     </div >
   );
