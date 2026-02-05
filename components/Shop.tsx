@@ -5,6 +5,7 @@ import { InfoTooltip } from './InfoTooltip';
 
 interface ShopProps {
   money: number;
+  diamonds: number;
   upgrades: UpgradeStats;
   buyUpgrade: (type: keyof UpgradeStats, cost: number) => void;
   onNextLevel: () => void;
@@ -12,10 +13,11 @@ interface ShopProps {
   equippedItem: EquipmentId;
   buyItem: (item: EquipmentId, cost: number) => void;
   equipItem: (item: EquipmentId) => void;
+  onExchangeDiamond: () => void;
   onSave?: () => void;
 }
 
-export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextLevel, ownedItems, equippedItem, buyItem, equipItem, onSave }) => {
+export const Shop: React.FC<ShopProps> = ({ money, diamonds, upgrades, buyUpgrade, onNextLevel, ownedItems, equippedItem, buyItem, equipItem, onExchangeDiamond, onSave }) => {
   const getCost = (level: number) => Math.floor(50 * Math.pow(1.5, level));
 
   const upgradesList = [
@@ -35,10 +37,30 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
   return (
     <div className="absolute inset-0 bg-slate-900 flex flex-col items-center p-4 md:p-8 text-white z-20 overflow-y-auto">
       <div className="flex flex-col items-center w-full max-w-4xl py-8">
-        <h1 className="text-4xl mb-4 font-bold text-purple-400 animate-pulse text-center">對接與改裝工坊</h1>
-        <p className="text-xl mb-8 bg-slate-800 px-6 py-2 rounded-full border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
-          持有金額: <span className="text-yellow-400 font-bold">${money}</span>
+        <h1 className="text-4xl mb-4 font-bold text-purple-400 animate-pulse text-center">對接與工作坊</h1>
+        <p className="text-xl mb-8 bg-slate-800 px-6 py-2 rounded-full border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.2)] flex items-center gap-6">
+          <span>持有金額: <span className="text-yellow-400 font-bold">${money}</span></span>
+          <span className="text-slate-600">|</span>
+          <span>鑽石餘額: <span className="text-cyan-400 font-bold">💎{diamonds}</span></span>
         </p>
+
+        {/* Diamond Exchange Section */}
+        <div className="w-full bg-slate-800/50 border-2 border-cyan-500/30 p-4 rounded-xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl animate-bounce">💎</span>
+            <div>
+              <h3 className="text-xl text-cyan-400 font-bold">高級貨幣兌換 (DIAMOND EXCHANGE)</h3>
+              <p className="text-slate-400 text-sm">將 1000 金幣壓縮為 1 顆永恆鑽石。鑽石在任何情況下皆不扣除。</p>
+            </div>
+          </div>
+          <button
+            onClick={onExchangeDiamond}
+            disabled={money < 1000}
+            className={`py-3 px-8 rounded-lg font-bold text-lg transition-all active:scale-95 ${money >= 1000 ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-slate-700 text-slate-500 cursor-not-allowed grayscale'}`}
+          >
+            兌換 💎1 ($1000)
+          </button>
+        </div>
 
         {/* Basic Upgrades */}
         <h2 className="text-2xl text-cyan-400 font-bold mb-4 self-start border-b border-cyan-500 w-full pb-2">系統升級 (SYSTEM UPGRADES)</h2>

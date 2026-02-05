@@ -890,13 +890,13 @@ const App: React.FC = () => {
   const handleBackToMenu = () => {
     if (finalDistance > 0 || displayStats.distance > 0) {
       const dist = finalDistance || displayStats.distance;
-      const time = gameState === GameState.GAME_OVER ? gameTime : gameTime; // gameTime is already tracked
+      const time = gameTime;
       setPostScoreAction('MENU');
       setPendingScore({
         distance: dist,
         time: time,
-        trajectory: currentTrajectory,
-        cargoTrajectory: currentCargoTrajectory
+        trajectory: (window as any).gameRefs?.currentTrajectory || currentTrajectory,
+        cargoTrajectory: (window as any).gameRefs?.currentCargoTrajectory || currentCargoTrajectory
       });
     } else {
       setShowSettings(false);
@@ -1145,6 +1145,13 @@ const App: React.FC = () => {
               )}
             </div>
 
+            <button
+              onClick={() => setShowLeaderboard(true)}
+              className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 mb-4"
+            >
+              📊 排行榜 (Leaderboard)
+            </button>
+
             {/* Nickname Input moved here */}
             <div className="flex flex-col gap-1 mb-4">
               <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700">
@@ -1383,7 +1390,7 @@ const App: React.FC = () => {
           <Leaderboard
             entries={leaderboard}
             onClose={() => setShowLeaderboard(false)}
-            onChallengeSeed={(entry) => handleStart(entry)}
+            onChallengeSeed={(entry) => { handleStart(entry); setShowLeaderboard(false); }}
             currentSeed={currentSeed}
             isAdmin={isAdmin}
             token={user?.token}
@@ -1691,30 +1698,8 @@ const App: React.FC = () => {
                   <InfoTooltip text="修復無人機機身損害。血量歸零將導致配送失敗。" position="bottom" />
                 </div>
                 <div className="relative group flex items-center">
-                  <button
-                    onClick={() => {
-                      if (money >= 1000) {
-                        const newMoney = money - 1000;
-                        const newDiamonds = diamonds + 1;
-                        setMoney(newMoney);
-                        setDiamonds(newDiamonds);
-                        saveGame(newMoney, newDiamonds);
-                        SoundManager.play('coin'); // 使用現有音效
-                        setVedalMessage("成功兌換 1 顆鑽石！💎");
-                      } else {
-                        setVedalMessage("金幣不足 1000，無法兌換鑽石。");
-                      }
-                    }}
-                    className={`bg-cyan-600 text-cyan-100 p-4 rounded-lg w-32 border-2 border-cyan-400 font-bold flex flex-col items-center justify-center gap-1 ${money < 1000 ? 'opacity-50 grayscale cursor-not-allowed' : 'hover:bg-cyan-500'}`}
-                  >
-                    <span>兌換鑽石</span>
-                    <span className="text-[10px]">$1000 → 💎1</span>
-                  </button>
-                  <InfoTooltip text="將 1000 金幣壓縮成 1 顆鑽石。鑽石是永久保存的高級貨幣，可用於後續特殊升級。" position="bottom" />
-                </div>
-                <div className="relative group flex items-center">
-                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">升級工坊</button>
-                  <InfoTooltip text="前往科學家 Vedal 的工作坊，升級硬體或購買特殊裝備。" position="bottom" />
+                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">工作坊</button>
+                  <InfoTooltip text="前往科學家 Vedal 的工作坊，升級硬體、兌換鑽石或購買特殊裝備。" position="bottom" />
                 </div>
               </div>
               <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl flex items-center gap-2">
@@ -1878,7 +1863,30 @@ const App: React.FC = () => {
       {
         gameState === GameState.SHOP && (
           <div className="pointer-events-auto absolute inset-0 z-50">
-            <Shop money={money} upgrades={upgrades} buyUpgrade={handleBuyUpgrade} onNextLevel={() => setGameState(GameState.CHECKPOINT_SHOP)} ownedItems={ownedItems} equippedItem={equippedItem} buyItem={handleBuyItem} equipItem={handleEquipItem} />
+            <Shop
+              money={money}
+              diamonds={diamonds}
+              upgrades={upgrades}
+              buyUpgrade={handleBuyUpgrade}
+              onNextLevel={() => setGameState(GameState.CHECKPOINT_SHOP)}
+              ownedItems={ownedItems}
+              equippedItem={equippedItem}
+              buyItem={handleBuyItem}
+              equipItem={handleEquipItem}
+              onExchangeDiamond={() => {
+                if (money >= 1000) {
+                  const newMoney = money - 1000;
+                  const newDiamonds = diamonds + 1;
+                  setMoney(newMoney);
+                  setDiamonds(newDiamonds);
+                  saveGame(newMoney, newDiamonds);
+                  SoundManager.play('coin');
+                  setVedalMessage("成功兌換 1 顆鑽石！💎");
+                } else {
+                  setVedalMessage("金幣不足 1000，無法兌換鑽石。");
+                }
+              }}
+            />
           </div>
         )
       }
@@ -2043,14 +2051,7 @@ const App: React.FC = () => {
       }
 
       {/* 全域貨幣顯示 (Global Currency Badge) */}
-      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex flex-col items-end gap-2">
-        <div className="bg-slate-900/90 border-2 border-yellow-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
-          <span className="text-2xl animate-pulse">💰</span>
-          <div className="flex flex-col">
-            <span className="text-[10px] text-yellow-500/70 font-bold leading-none uppercase tracking-widest">Balance</span>
-            <span className="text-2xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
-          </div>
-        </div>
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-2">
         {(diamonds > 0 || isAdmin) && (
           <div className="bg-slate-900/90 border-2 border-cyan-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
             <span className="text-2xl animate-bounce">💎</span>
@@ -2060,11 +2061,18 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+        <div className="bg-slate-900/90 border-2 border-yellow-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
+          <span className="text-2xl animate-pulse">💰</span>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-yellow-500/70 font-bold leading-none uppercase tracking-widest">Balance</span>
+            <span className="text-2xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
+          </div>
+        </div>
       </div>
 
       {/* Version Number */}
-      <div className="absolute bottom-1 left-1 z-[200] text-[8px] font-bold text-slate-500 pointer-events-none select-none opacity-50 font-sans tracking-tighter">
-        Alpha 1.4i (TC)
+      <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
+        Alpha 1.4j (TC)
       </div>
     </div >
   );
