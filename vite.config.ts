@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import crypto from 'node:crypto';
 import { defineConfig, loadEnv, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -14,28 +15,212 @@ const leaderboardStoragePlugin = (): Plugin => ({
     // structure: { id: { name, players, maxPlayers, lastSeen } }
     let activeRooms: Record<string, any> = {};
 
+    // Authenticaion & User Setup
+    // crypto is imported at the top of the file
+    const usersPath = path.resolve(__dirname, 'users.json');
+    let users: Record<string, any> = {};
+
+    if (fs.existsSync(usersPath)) {
+      try {
+        users = JSON.parse(fs.readFileSync(usersPath, 'utf8'));
+      } catch (e) {
+        users = {};
+      }
+    }
+
+    const sessions = new Map();
+
+    const saveUsers = () => {
+      fs.writeFileSync(usersPath, JSON.stringify(users, null, 2), 'utf8');
+    };
+
+    const hashPassword = (password: string, salt: string) => {
+      return crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+    };
+
+    const generateToken = () => {
+      return crypto.randomBytes(32).toString('hex');
+    };
+
     server.middlewares.use(async (req, res, next) => {
       const url = req.url || '';
 
-      // --- ROOM LISTING API ---
+      // --- AUTH API ---
+      if (url === '/api/register' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { username, password } = JSON.parse(body);
+            if (!username || !password) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Missing fields' }));
+              return;
+            }
+            if (users[username]) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'User already exists' }));
+              return;
+            }
+
+            const salt = crypto.randomBytes(16).toString('hex');
+            const hash = hashPassword(password, salt);
+
+            users[username] = {
+              hash,
+              salt,
+              saveData: { money: 0 },
+              joinedAt: Date.now()
+            };
+            saveUsers();
+
+            const token = generateToken();
+            sessions.set(token, { username, expires: Date.now() + 86400000 });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, token, username, saveData: users[username].saveData }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/login' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { username, password } = JSON.parse(body);
+            const user = users[username];
+            if (!user) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'User not found' }));
+              return;
+            }
+
+            const hash = hashPassword(password, user.salt);
+            if (hash !== user.hash) {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Invalid password' }));
+              return;
+            }
+
+            const token = generateToken();
+            sessions.set(token, { username, expires: Date.now() + 86400000 });
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ success: true, token, username, saveData: user.saveData }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/save' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, saveData } = JSON.parse(body);
+            const session = sessions.get(token);
+
+            if (!session || session.expires < Date.now()) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'Invalid or expired token' }));
+              return;
+            }
+
+            const { username } = session;
+            if (users[username]) {
+              if (typeof saveData.money === 'number') {
+                users[username].saveData.money = saveData.money;
+                saveUsers();
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ success: true, savedMoney: users[username].saveData.money }));
+              } else {
+                res.statusCode = 400;
+                res.end(JSON.stringify({ error: 'Invalid money value' }));
+              }
+            } else {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: 'User not found' }));
+            }
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/verify-token' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token } = JSON.parse(body);
+            const session = sessions.get(token);
+            if (!session || session.expires < Date.now()) {
+              res.statusCode = 401;
+              res.end(JSON.stringify({ error: 'Session expired' }));
+              return;
+            }
+            const { username } = session;
+            if (users[username]) {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true, username, saveData: users[username].saveData }));
+            } else {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: 'User not found' }));
+            }
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      // --- ADMIN & UTILITY API ---
+      if (url === '/api/check-name' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { username } = JSON.parse(body);
+            const exists = !!users[username];
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ exists }));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      const isAdmin = (token: string) => {
+        const session = sessions.get(token);
+        if (!session || session.expires < Date.now()) return false;
+        return ['Wheel', 'Admin', 'Neuro'].includes(session.username);
+      };
+
+      // --- ROOM LISTING API (Existing) ---
       if (url.startsWith('/api/rooms')) {
-        // GET: List active rooms
         if (req.method === 'GET') {
           const now = Date.now();
-          // Filter out rooms not seen in last 10 seconds
           const activeList = Object.values(activeRooms).filter((r: any) => now - r.lastSeen < 10000);
-
-          // Cleanup old rooms
           Object.keys(activeRooms).forEach(key => {
             if (now - activeRooms[key].lastSeen > 10000) delete activeRooms[key];
           });
-
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(activeList));
           return;
         }
-
-        // POST: Heartbeat / Register
         if (req.method === 'POST') {
           let body = '';
           req.on('data', chunk => { body += chunk; });
@@ -43,10 +228,7 @@ const leaderboardStoragePlugin = (): Plugin => ({
             try {
               const data = JSON.parse(body);
               if (data.id) {
-                activeRooms[data.id] = {
-                  ...data,
-                  lastSeen: Date.now()
-                };
+                activeRooms[data.id] = { ...data, lastSeen: Date.now() };
                 res.setHeader('Content-Type', 'application/json');
                 res.end(JSON.stringify({ success: true }));
               } else {
@@ -69,18 +251,12 @@ const leaderboardStoragePlugin = (): Plugin => ({
         if (req.method === 'GET') {
           let data = [];
           if (fs.existsSync(leaderboardPath)) {
-            const content = fs.readFileSync(leaderboardPath, 'utf8');
-            try {
-              data = JSON.parse(content);
-            } catch (e) {
-              data = [];
-            }
+            data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
           }
           res.setHeader('Content-Type', 'application/json');
           res.end(JSON.stringify(data));
           return;
         }
-
         if (req.method === 'POST') {
           let body = '';
           req.on('data', chunk => { body += chunk; });
@@ -108,6 +284,94 @@ const leaderboardStoragePlugin = (): Plugin => ({
           return;
         }
       }
+
+      if (url === '/api/admin/delete-entry' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, entryIndex } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            let data = [];
+            if (fs.existsSync(leaderboardPath)) {
+              data = JSON.parse(fs.readFileSync(leaderboardPath, 'utf8'));
+            }
+            if (entryIndex >= 0 && entryIndex < data.length) {
+              data.splice(entryIndex, 1);
+              fs.writeFileSync(leaderboardPath, JSON.stringify(data, null, 2), 'utf8');
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true }));
+            } else {
+              res.statusCode = 400;
+              res.end(JSON.stringify({ error: 'Invalid index' }));
+            }
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/admin/list-users' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            // Return simplified user objects
+            const userList = Object.keys(users).map(name => ({
+              username: name,
+              joinedAt: users[name].joinedAt || 0,
+              money: users[name].saveData?.money || 0
+            }));
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify(userList));
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
+      if (url === '/api/admin/delete-user' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; });
+        req.on('end', () => {
+          try {
+            const { token, username } = JSON.parse(body);
+            if (!isAdmin(token)) {
+              res.statusCode = 403;
+              res.end(JSON.stringify({ error: 'Forbidden' }));
+              return;
+            }
+            if (users[username]) {
+              delete users[username];
+              saveUsers();
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ success: true }));
+            } else {
+              res.statusCode = 404;
+              res.end(JSON.stringify({ error: 'User not found' }));
+            }
+          } catch (e) {
+            res.statusCode = 400;
+            res.end(JSON.stringify({ error: 'Invalid Request' }));
+          }
+        });
+        return;
+      }
+
       next();
     });
   }

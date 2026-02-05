@@ -221,7 +221,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             const cpX = startX + 200;
             // Randomize Checkpoint Height slightly to keep it interesting
             const cpY = 300 + Math.floor(rngRef.current() * 400);
-            walls.push({ x: cpX, y: cpY, w: 300, h: 20, type: 'checkpoint' });
+            walls.push({ x: cpX, y: cpY, w: 400, h: 20, type: 'checkpoint' });
 
             // Safe zone around checkpoint
             nextCheckpointX.current += Constants.CHECKPOINT_INTERVAL + (rngRef.current() * 500);
@@ -370,7 +370,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         cargoRef.current = {
             // Spawn cargo slightly to the left/behind drone
-            pos: { x: lastCheckpoint.x - 25, y: lastCheckpoint.y + 10 },
+            pos: { x: lastCheckpoint.x - 25, y: lastCheckpoint.y + 5 },
             vel: { x: 0, y: 0 },
             angle: 0,
             angularVel: 0,
@@ -491,7 +491,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // The checkpoint pad
         const cpWallX = lastCheckpoint.x - 200;
-        levelRef.current.walls.push({ x: cpWallX, y: 880, w: 400, h: 20, type: 'checkpoint' });
+        levelRef.current.walls.push({ x: cpWallX, y: lastCheckpoint.y + 20, w: 400, h: 20, type: 'checkpoint' });
 
         lastDeliveryWallX.current = cpWallX;
 
@@ -528,7 +528,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             w.type === 'checkpoint' && Math.abs(w.x - cpWallX) < 10
         );
         if (!hasCheckpointWall) {
-            levelRef.current.walls.push({ x: cpWallX, y: 880, w: 400, h: 20, type: 'checkpoint' });
+            levelRef.current.walls.push({ x: cpWallX, y: lastCheckpoint.y + 20, w: 400, h: 20, type: 'checkpoint' });
         }
 
         // CRITICAL: In multiplayer, NEVER reset train unless explicitly forced (GLOBAL_RESTART)
@@ -687,7 +687,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         levelRef.current.walls.push({ x: startWallX - 400, y: -1000, w: 1200, h: 1000, type: 'wall' }); // Ceiling
                         // Checkpad
                         const cpWallX = (hostGenStartX - 400) - 200;
-                        levelRef.current.walls.push({ x: cpWallX, y: 880, w: 400, h: 20, type: 'checkpoint' });
+                        levelRef.current.walls.push({ x: cpWallX, y: lastCheckpoint.y + 20, w: 400, h: 20, type: 'checkpoint' });
 
                         // 5. Fast Forward Generation
                         let simGenX = hostGenStartX;
@@ -1517,7 +1517,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                         if (wall.x !== lastDeliveryWallX.current) {
                                             lastDeliveryWallX.current = wall.x;
 
-                                            setLastCheckpoint({ x: wall.x + wall.w / 2, y: wall.y - 50 });
+                                            setLastCheckpoint({ x: wall.x + 200, y: wall.y - 20 });
                                             setGameState(GameState.CHECKPOINT_SHOP);
                                             SoundManager.play('shop');
 

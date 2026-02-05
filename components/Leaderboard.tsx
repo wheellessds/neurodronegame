@@ -7,10 +7,35 @@ interface LeaderboardProps {
     onClose: () => void;
     onExport?: () => void;
     onChallengeSeed?: (seed: string | LeaderboardEntry) => void;
+    isAdmin?: boolean;
+    token?: string;
+    onEntryDeleted?: () => void;
 }
 
-export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onExport, onChallengeSeed }) => {
+export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onExport, onChallengeSeed, isAdmin, token, onEntryDeleted }) => {
     const [showLegacy, setShowLegacy] = React.useState(true);
+    const [isDeleting, setIsDeleting] = React.useState<number | null>(null);
+
+    const handleDeleteEntry = async (index: number) => {
+        if (!confirm("確定要刪除此條分數紀錄嗎？")) return;
+        setIsDeleting(index);
+        try {
+            const res = await fetch('/api/admin/delete-entry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, entryIndex: index })
+            });
+            if (res.ok) {
+                onEntryDeleted?.();
+            } else {
+                alert("刪除失敗。");
+            }
+        } catch (e) {
+            console.error("Delete failed", e);
+        } finally {
+            setIsDeleting(null);
+        }
+    };
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -41,6 +66,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
                             <th className="py-2 px-4 text-right">距離</th>
                             <th className="py-2 px-4 text-right">時間</th>
                             <th className="py-2 px-4 text-center">日期</th>
+                            {isAdmin && <th className="py-2 px-4 text-center">管理</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -95,6 +121,17 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
                                     <td className="py-3 px-4 text-right font-mono">{entry.distance}m</td>
                                     <td className="py-3 px-4 text-right font-mono text-cyan-500">{formatTime(entry.time)}</td>
                                     <td className="py-3 px-4 text-center text-xs text-slate-500">{entry.date}</td>
+                                    {isAdmin && (
+                                        <td className="py-3 px-4 text-center">
+                                            <button
+                                                onClick={() => handleDeleteEntry(index)}
+                                                disabled={isDeleting !== null}
+                                                className="bg-red-900/50 hover:bg-red-600 text-red-100 text-[10px] px-2 py-1 rounded border border-red-700 transition-colors"
+                                            >
+                                                {isDeleting === index ? '...' : '刪除紀錄'}
+                                            </button>
+                                        </td>
+                                    )}
                                 </tr>
                             ))
                         )}

@@ -35,6 +35,11 @@ interface SettingsOverlayProps {
     onToggleMobileMode?: () => void;
     onForceRestart?: () => void;
     initialTab?: 'general' | 'keyboard' | 'mobile' | 'room';
+    isAdmin?: boolean;
+    isLoggedIn?: boolean;
+    nameError?: string | null;
+    vedalMessage?: string;
+    onLogout?: () => void;
 }
 
 export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
@@ -60,7 +65,12 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     isMobileMode,
     onToggleMobileMode,
     onForceRestart,
-    initialTab
+    initialTab,
+    isAdmin,
+    isLoggedIn,
+    nameError,
+    vedalMessage,
+    onLogout
 }) => {
     const [activeTab, setActiveTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>(initialTab || 'general');
     const [bindingKey, setBindingKey] = useState<keyof ControlsConfig['keys'] | null>(null);
@@ -114,17 +124,48 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                 </div>
 
                 {/* Content */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+                    {vedalMessage && (
+                        <div className="bg-pink-900/30 border border-pink-500/50 p-3 rounded-lg text-pink-300 text-xs font-bold animate-pulse flex items-center gap-2">
+                            <span>💬</span>
+                            <span>{vedalMessage}</span>
+                        </div>
+                    )}
                     {activeTab === 'general' && (
                         <div className="space-y-4">
-                            <SettingItem label="PLAYER NAME (暱稱)" info="設定在排行榜和多人模式中顯示的名稱。">
-                                <input
-                                    type="text"
-                                    value={playerName || ''}
-                                    onChange={(e) => onUpdateName?.(e.target.value.slice(0, 12))}
-                                    className="bg-black/50 border border-cyan-500 rounded px-2 py-1 text-yellow-400 font-bold w-32 outline-none focus:ring-1 focus:ring-cyan-500"
-                                />
+                            <SettingItem label="PLAYER NAME (暱稱)" info={isLoggedIn ? "外送員已報到，無法更改暱稱。" : "設定在排行榜和多人模式中顯示的名稱。"}>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={playerName || ''}
+                                        onChange={(e) => !isLoggedIn && onUpdateName?.(e.target.value.slice(0, 12))}
+                                        disabled={isLoggedIn}
+                                        className={`bg-black/50 border border-cyan-500 rounded px-2 py-1 text-yellow-400 font-bold w-32 outline-none focus:ring-1 focus:ring-cyan-500 ${isLoggedIn ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    />
+                                    {nameError && (
+                                        <div className="absolute top-full left-0 mt-1 text-red-500 text-[10px] font-bold whitespace-nowrap bg-black/80 px-1 rounded z-10 animate-pulse">
+                                            ⚠️ {nameError}
+                                        </div>
+                                    )}
+                                </div>
                             </SettingItem>
+
+                            {isLoggedIn && (
+                                <div className="pt-4 border-t border-red-900/30">
+                                    <button
+                                        onClick={() => {
+                                            if (confirm("確定要登出系統嗎？")) {
+                                                onLogout?.();
+                                            }
+                                        }}
+                                        className="w-full bg-red-950/40 hover:bg-red-600 text-red-200 font-bold py-2 px-4 rounded border border-red-500/50 transition-all active:scale-95 flex items-center justify-center gap-2 group"
+                                    >
+                                        <span className="text-lg">🚪</span>
+                                        LOGOUT (登出帳號)
+                                    </button>
+                                </div>
+                            )}
+
                             <SettingItem label="DIFFICULTY (難度)" info="切換操作模式。普通模式全手動；簡單模式有無人機自動找正功能。">
                                 <button
                                     onClick={onDifficultyToggle}
@@ -179,18 +220,7 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                 </div>
                             </div>
 
-                            <div className="pt-4 border-t border-slate-800 text-center">
-                                <button
-                                    onClick={onQuit}
-                                    className="w-full bg-red-900/40 hover:bg-red-900/60 border-2 border-red-700 text-red-100 py-3 rounded-xl font-bold transition-all active:scale-95 mb-2"
-                                >
-                                    QUIT TO MENU (回到選單)
-                                </button>
-                                <div className="flex items-center justify-center gap-1 text-slate-500 text-xs">
-                                    <span>回主畫面</span>
-                                    <InfoTooltip text="放棄當前任務並回到主選單。未存檔的積分將會消失。" />
-                                </div>
-                            </div>
+
                         </div>
                     )}
 
@@ -355,16 +385,30 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="p-4 bg-slate-800/80 border-t border-cyan-800 flex justify-center">
+                <div className="p-6 bg-slate-800/80 border-t border-cyan-800 flex flex-col items-center gap-4">
                     <button
                         onClick={onResume}
-                        className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-12 rounded-full text-xl shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all active:scale-95"
+                        className="w-full max-w-sm bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-12 rounded-full text-xl shadow-[0_0_15px_rgba(6,182,212,0.3)] transition-all active:scale-95"
                     >
                         RESUME (繼續)
                     </button>
+
+                    <div className="w-full max-w-sm pt-2 border-t border-slate-700/50">
+                        <button
+                            onClick={onQuit}
+                            className="w-full bg-red-900/40 hover:bg-red-600 border-2 border-red-700 text-red-100 py-2 rounded-xl font-bold transition-all active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            <span className="text-lg">🏠</span>
+                            QUIT TO MENU (回到選單)
+                        </button>
+                        <div className="flex items-center justify-center gap-1 text-slate-500 text-[10px] mt-1">
+                            <span>點擊放棄任務並返回主畫面</span>
+                            <InfoTooltip text="放棄當前任務並回到主選單。未存檔的積分將會消失。" />
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+            </div >
+        </div >
     );
 };
 

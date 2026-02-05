@@ -12,9 +12,10 @@ interface ShopProps {
   equippedItem: EquipmentId;
   buyItem: (item: EquipmentId, cost: number) => void;
   equipItem: (item: EquipmentId) => void;
+  onSave?: () => void;
 }
 
-export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextLevel, ownedItems, equippedItem, buyItem, equipItem }) => {
+export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextLevel, ownedItems, equippedItem, buyItem, equipItem, onSave }) => {
   const getCost = (level: number) => Math.floor(50 * Math.pow(1.5, level));
 
   const upgradesList = [
@@ -34,13 +35,13 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
   return (
     <div className="absolute inset-0 bg-slate-900 flex flex-col items-center p-4 md:p-8 text-white z-20 overflow-y-auto">
       <div className="flex flex-col items-center w-full max-w-4xl py-8">
-        <h1 className="text-4xl mb-4 font-bold text-purple-400 animate-pulse text-center">DRONE WORKSHOP</h1>
+        <h1 className="text-4xl mb-4 font-bold text-purple-400 animate-pulse text-center">對接與改裝工坊</h1>
         <p className="text-xl mb-8 bg-slate-800 px-6 py-2 rounded-full border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
           持有金額: <span className="text-yellow-400 font-bold">${money}</span>
         </p>
 
         {/* Basic Upgrades */}
-        <h2 className="text-2xl text-cyan-400 font-bold mb-4 self-start border-b border-cyan-500 w-full pb-2">SYSTEM UPGRADES (系統升級)</h2>
+        <h2 className="text-2xl text-cyan-400 font-bold mb-4 self-start border-b border-cyan-500 w-full pb-2">系統升級 (SYSTEM UPGRADES)</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full mb-8">
           {upgradesList.map((item) => {
             const level = upgrades[item.key as keyof UpgradeStats];
@@ -64,7 +65,7 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
                   disabled={!canAfford}
                   className={`mt-4 py-3 px-4 rounded font-bold w-full transition-all active:scale-95 touch-manipulation ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg' : 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50'}`}
                 >
-                  升級 Upgrade (${cost})
+                  升級 (${cost})
                 </button>
               </div>
             );
@@ -72,7 +73,7 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
         </div>
 
         {/* Equipment */}
-        <h2 className="text-2xl text-orange-400 font-bold mb-4 self-start border-b border-orange-500 w-full pb-2">SPECIAL EQUIPMENT (特殊裝備)</h2>
+        <h2 className="text-2xl text-orange-400 font-bold mb-4 self-start border-b border-orange-500 w-full pb-2">特殊裝備 (SPECIAL EQUIPMENT)</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full mb-8">
           {equipmentList.map((item) => {
             const owned = ownedItems.includes(item.id as EquipmentId);
@@ -94,7 +95,7 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
                     disabled={equipped}
                     className={`mt-2 py-2 px-4 rounded font-bold w-full ${equipped ? 'bg-orange-600 text-white cursor-default' : 'bg-slate-600 hover:bg-slate-500 text-white'}`}
                   >
-                    {equipped ? 'EQUIPPED (已裝備)' : 'EQUIP (裝備)'}
+                    {equipped ? '已裝備' : '裝備'}
                   </button>
                 ) : (
                   <button
@@ -102,7 +103,7 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
                     disabled={!canAfford}
                     className={`mt-2 py-2 px-4 rounded font-bold w-full ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
                   >
-                    BUY (${item.cost})
+                    購買 (${item.cost})
                   </button>
                 )}
               </div>
@@ -110,15 +111,18 @@ export const Shop: React.FC<ShopProps> = ({ money, upgrades, buyUpgrade, onNextL
           })}
           {/* Unequip Option */}
           <div className={`bg-slate-800 p-4 rounded-lg border border-slate-600 shadow-lg flex flex-col justify-between items-center opacity-80`}>
-            <h3 className="text-lg text-gray-400 font-bold">No Equipment</h3>
+            <h3 className="text-lg text-gray-400 font-bold">無裝備</h3>
             <button onClick={() => equipItem('NONE')} disabled={equippedItem === 'NONE'} className={`mt-auto py-2 px-4 rounded font-bold w-full ${equippedItem === 'NONE' ? 'bg-gray-700 cursor-default' : 'bg-slate-600 hover:bg-slate-500'}`}>
-              {equippedItem === 'NONE' ? 'ACTIVE' : 'UNEQUIP'}
+              {equippedItem === 'NONE' ? '啟用' : '卸除'}
             </button>
           </div>
         </div>
 
         <button
-          onClick={onNextLevel}
+          onClick={() => {
+            if (onSave) onSave();
+            onNextLevel();
+          }}
           className="mt-4 bg-gray-500 hover:bg-gray-400 active:bg-gray-600 text-white text-xl md:text-2xl py-4 px-12 rounded-full font-bold shadow-lg w-full md:w-auto touch-manipulation mb-8"
         >
           返回存檔點 (BACK)

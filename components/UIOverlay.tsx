@@ -14,14 +14,17 @@ interface UIOverlayProps {
     urgentOrderProgress: { percent: number, timeLeft: number } | null;
     onAvatarClick?: () => void;
     isFullscreen?: boolean;
+    isAdmin?: boolean;
+    userName?: string;
+    nameError?: string | null;
 }
 
-export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatus, persona, vedalMessage, isMobile, urgentOrderProgress, onAvatarClick, isFullscreen: isFullscreenProp }) => {
+export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatus, persona, vedalMessage, isMobile, urgentOrderProgress, onAvatarClick, isFullscreen: isFullscreenProp, isAdmin, userName, nameError }) => {
     // Falls back to checking document if prop not provided (for safety)
     const isFullscreen = isFullscreenProp ?? !!document.fullscreenElement;
 
     const parts = vedalMessage.split('||');
-    const enMsg = parts[0];
+    const displayMsg = parts.length > 1 ? parts[1] : parts[0];
 
     const formatTime = (seconds: number) => {
         const mins = Math.floor(seconds / 60);
@@ -42,7 +45,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatu
     return (
         <div className="absolute inset-0 pointer-events-none p-4 flex flex-col justify-between z-40 overflow-hidden font-vt323">
             {!isFullscreen && (
-                <div className="absolute top-4 right-4 pointer-events-auto flex items-center gap-1 group">
+                <div className="absolute top-24 right-4 pointer-events-auto flex items-center gap-1 group">
                     <button
                         onClick={toggleFullscreen}
                         className="bg-slate-800/80 border border-slate-500 text-white/70 hover:text-white p-2 rounded-lg backdrop-blur-sm flex items-center gap-2 active:scale-95 transition-all text-xs"
@@ -93,17 +96,24 @@ export const UIOverlay: React.FC<UIOverlayProps> = ({ stats, gameTime, faceStatu
                             </div>
 
                             <div className={`bg-slate-800/80 border border-slate-500 p-1.5 rounded backdrop-blur-sm transition-all ${isMobile ? 'max-w-[200px]' : 'max-w-lg'}`}>
-                                <span className="text-green-400 font-bold block text-[8px] leading-none mb-0.5">VEDAL</span>
-                                <p className={`${isMobile ? 'text-[11px]' : 'text-lg'} text-white leading-tight font-bold`}>{enMsg}</p>
+                                <div className="flex justify-between items-center mb-0.5">
+                                    <span className="text-green-400 font-bold block text-[8px] leading-none">VEDAL</span>
+                                    {userName && (
+                                        <span className="text-[10px] text-cyan-400/70 font-mono flex items-center gap-1">
+                                            {isAdmin && <span title="管理員權限" className="text-yellow-400">🛡️</span>}
+                                            {userName}
+                                        </span>
+                                    )}
+                                </div>
+                                <p className={`${isMobile ? 'text-[11px]' : 'text-lg'} text-white leading-tight font-bold`}>{displayMsg}</p>
+                                {nameError && (
+                                    <p className="text-red-500 text-[10px] mt-1 font-bold animate-pulse">⚠️ {nameError}</p>
+                                )}
                             </div>
                         </div>
                     </div>
 
                     <div className="flex flex-col items-end gap-1">
-                        <div className="bg-slate-800/80 border border-yellow-500 px-3 py-1 rounded backdrop-blur-sm shadow-[0_0_10px_rgba(234,179,8,0.3)]">
-                            <span className="text-yellow-400 text-lg font-bold">${stats.money}</span>
-                        </div>
-
                         {isMobile && (
                             <div className="flex flex-col gap-1 w-24">
                                 <CompactBar label="FUEL" val={stats.fuel} color="bg-blue-500" />

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { GameCanvas } from './components/GameCanvas';
 import { Shop } from './components/Shop';
 import { UIOverlay } from './components/UIOverlay';
@@ -13,6 +13,8 @@ import { LoadingScreen } from './components/LoadingScreen';
 import { preloadAssets } from './utils/assetLoader';
 import { MultiplayerManager, RemotePlayer, MultiplayerEvent } from './utils/multiplayer';
 import { InfoTooltip } from './components/InfoTooltip';
+import { LoginModal } from './components/LoginModal';
+import { UserManagement } from './components/UserManagement';
 
 // Assets to preload
 import neuroIdle from './assets/face/neuro_idle.gif';
@@ -41,6 +43,12 @@ const DEFAULT_CONTROLS: ControlsConfig = {
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.LOADING);
+  // 用户与登录状态
+  const [user, setUser] = useState<{ username: string, token: string, saveData: any } | null>(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [showLogin, setShowLogin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('Initializing Neural Networks...');
   const [persona, setPersona] = useState<Persona>(Persona.NEURO);
@@ -55,28 +63,31 @@ const App: React.FC = () => {
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [pendingScore, setPendingScore] = useState<{ distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[] } | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showUserMgmt, setShowUserMgmt] = useState(false);
 
-  const [postScoreAction, setPostScoreAction] = useState<'RESTART' | 'MENU' | null>(null);
+  // 这里的 LoginModal 不需要导入，因为 App 文件头部已经导入了（稍后添加 imports）
+  // 暂时用 any 绕过类型检查，下面会补上
+  // ...
 
-  const [isMobileMode, setIsMobileMode] = useState(false);
-  const [currentSeed, setCurrentSeed] = useState(Math.random().toString(36).substring(2, 9).toUpperCase());
-  const [isChallengingSeed, setIsChallengingSeed] = useState(false);
-  const [ghostData, setGhostData] = useState<{ trajectory: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name: string } | null>(null);
-  const [currentTrajectory, setCurrentTrajectory] = useState<{ x: number, y: number }[]>([]);
-  const [currentCargoTrajectory, setCurrentCargoTrajectory] = useState<{ x: number, y: number }[]>([]);
+  // [NEW] Save Game Function
+  const saveGame = useCallback(async (currentMoney: number) => {
+    if (!user) return;
+    try {
+      await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: user.token,
+          saveData: { money: currentMoney }
+        })
+      });
+    } catch (e) {
+      console.error("Auto-save failed", e);
+    }
+  }, [user]);
 
-  const [lastCheckpoint, setLastCheckpoint] = useState<Vector2>({ x: 200, y: 860 });
-  const [ownedItems, setOwnedItems] = useState<EquipmentId[]>(['default']);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [equippedItem, setEquippedItem] = useState<EquipmentId>('NONE');
-  const [displayStats, setDisplayStats] = useState({ hp: 100, fuel: 100, cargoHp: 100, distance: 0, distToNext: 0 });
-  const [faceStatus, setFaceStatus] = useState<'idle' | 'panic' | 'dead' | 'win' | 'fast'>('idle');
-  const [vedalMessage, setVedalMessage] = useState("Deliver the Rum. Don't break it.||運送蘭姆酒，別打破了。");
-  const [urgentOrderProgress, setUrgentOrderProgress] = useState<{ percent: number, timeLeft: number } | null>(null);
-
-  const [upgrades, setUpgrades] = useState<UpgradeStats>({
-    engineLevel: 0, tankLevel: 0, hullLevel: 0, cableLevel: 0, cargoLevel: 0, money: INITIAL_MONEY
-  });
+  // [NEW] 当 dinero 改变时，防抖保存 (这里简化为在关键节点保存，防止频繁请求)
+  // 目前策略：Game Over / Shop Close 时保存。但为了通过测试，我们在 setMoney 处不直接保存，而是单独调用。
 
   // Multiplayer State
   const [multiplayerMode, setMultiplayerMode] = useState<boolean>(false);
@@ -94,9 +105,111 @@ const App: React.FC = () => {
   const [joinError, setJoinError] = useState<string | null>(null);
   const [autoJoin, setAutoJoin] = useState(false);
   const [playerName, setPlayerName] = useState(() => localStorage.getItem('neuro_drone_name') || `Drone-${Math.floor(1000 + Math.random() * 9000)}`);
+  const [nameError, setNameError] = useState<string | null>(null);
   const [roomParticipants, setRoomParticipants] = useState<{ id: string, name: string }[]>([]);
 
+  const handleUpdateName = useCallback(async (name: string) => {
+    setPlayerName(name);
+    localStorage.setItem('neuro_drone_name', name);
+    setNameError(null);
+    setVedalMessage("");
+
+    if (!user && name.length > 0) {
+      try {
+        const res = await fetch('/api/check-name', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: name })
+        });
+        const data = await res.json();
+        if (data && data.exists) {
+          setNameError("此暱稱已被註冊。訪客請更換名稱。");
+          setVedalMessage("偵測到身份冒用... 請更換暱稱。");
+        }
+      } catch (e) {
+        console.error("Name check failed", e);
+      }
+    }
+  }, [user]);
+
   const [showAdmin, setShowAdmin] = useState(false);
+
+  // [NEW] Check name conflict or verification token for persistence
+  useEffect(() => {
+    const savedToken = localStorage.getItem('neuro_drone_token');
+
+    if (savedToken) {
+      // Try to verify token
+      fetch('/api/verify-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: savedToken })
+      })
+        .then(res => res.json())
+        .then(u => {
+          if (u.success) {
+            setUser({ token: savedToken, username: u.username, saveData: u.saveData });
+            setMoney(u.saveData.money);
+            setPlayerName(u.username);
+            setIsAdmin(['Wheel', 'Admin', 'Neuro'].includes(u.username));
+            setNameError(null);
+            setShowLogin(false); // Hide login modal if auto-logged in
+          } else {
+            localStorage.removeItem('neuro_drone_token');
+            // If token invalid, proceed as guest to check name
+            if (playerName) {
+              fetch('/api/check-name', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: playerName })
+              })
+                .then(res => res.json())
+                .then(data => {
+                  if (data && data.exists) {
+                    setNameError("此暱稱已被註冊。訪客請更換名稱。");
+                    setVedalMessage("偵測到身份冒用... 請更換暱稱。");
+                  }
+                })
+                .catch(e => console.error("Initial name check failed", e));
+            }
+          }
+        })
+        .catch(e => {
+          console.error("Verify token failed", e);
+          localStorage.removeItem('neuro_drone_token');
+          // If API call fails, proceed as guest to check name
+          if (playerName) {
+            fetch('/api/check-name', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: playerName })
+            })
+              .then(res => res.json())
+              .then(data => {
+                if (data && data.exists) {
+                  setNameError("此暱稱已被註冊。訪客請更換名稱。");
+                  setVedalMessage("偵測到身份冒用... 請更換暱稱。");
+                }
+              })
+              .catch(e => console.error("Initial name check failed", e));
+          }
+        });
+    } else if (!user && playerName) {
+      fetch('/api/check-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: playerName })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.exists) {
+            setNameError("此暱稱已被註冊。訪客請更換名稱。");
+            setVedalMessage("偵測到身份冒用... 請更換暱稱。");
+          }
+        })
+        .catch(e => console.error("Initial name check failed", e));
+    }
+  }, []); // Run only once on mount
   const [adminCommand, setAdminCommand] = useState('');
   const adminInputRef = useRef<HTMLInputElement>(null);
   const [deathDetails, setDeathDetails] = useState({ reason: '', reasonDisplay: '', taunt: '' });
@@ -108,6 +221,48 @@ const App: React.FC = () => {
   const [pendingRequests, setPendingRequests] = useState<{ id: string, name: string }[]>([]);
   const [settingsTab, setSettingsTab] = useState<'general' | 'keyboard' | 'mobile' | 'room'>('general');
   const [mpUpdateRate, setMpUpdateRate] = useState<'low' | 'med' | 'high'>('med');
+
+  // [RESTORED] Missing States
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [vedalMessage, setVedalMessage] = useState<string>('');
+  const [faceStatus, setFaceStatus] = useState<'idle' | 'panic' | 'win' | 'dead'>('idle');
+  const [urgentOrderProgress, setUrgentOrderProgress] = useState<{ percent: number, timeLeft: number } | null>(null);
+  const [lastCheckpoint, setLastCheckpoint] = useState<Vector2>({ x: 200, y: 860 });
+  const [currentSeed, setCurrentSeed] = useState<string>('');
+  const [isChallengingSeed, setIsChallengingSeed] = useState(false);
+  const [ghostData, setGhostData] = useState<{ trajectory: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name: string } | null>(null);
+
+  // Trajectory State
+  const [currentTrajectory, setCurrentTrajectory] = useState<{ x: number, y: number }[]>([]);
+  const [currentCargoTrajectory, setCurrentCargoTrajectory] = useState<{ x: number, y: number }[]>([]);
+
+  // Game Over Action
+  const [postScoreAction, setPostScoreAction] = useState<'NONE' | 'SAVING' | 'SAVED'>('NONE');
+
+  // Upgrades & Inventory
+  const [upgrades, setUpgrades] = useState<UpgradeStats>({
+    engineLevel: 0,
+    tankLevel: 0,
+    hullLevel: 0,
+    cableLevel: 0,
+    cargoLevel: 0,
+    money: INITIAL_MONEY
+  });
+  const [ownedItems, setOwnedItems] = useState<EquipmentId[]>(['NONE']);
+  const [equippedItem, setEquippedItem] = useState<EquipmentId>('NONE');
+
+  // Mobile Mode
+  const [isMobileMode, setIsMobileMode] = useState(false);
+
+  // Stats for UI Display
+  const [displayStats, setDisplayStats] = useState({
+    hp: 100,
+    fuel: 100,
+    cargoHp: 100,
+    distance: 0,
+    distToNext: 0
+  });
+
 
   // 准备状态管理
   const [playerReadyStates, setPlayerReadyStates] = useState<Map<string, boolean>>(new Map());
@@ -226,13 +381,13 @@ const App: React.FC = () => {
     ];
 
     const messages = [
-      "Calibrating Gyroscopes...",
-      "Refining Neural Pathways...",
-      "Polishing Rum Bottles...",
-      "Warming up Evil's Sass...",
-      "Calculating Optimal Delivery Routes...",
-      "Bribing Vedal with Coffee...",
-      "Loading Turtle Swarm..."
+      "正在校準陀螺儀...",
+      "優化神經網路路徑...",
+      "正在擦亮蘭姆酒瓶...",
+      "Evil 正在準備嘲諷...",
+      "計算最佳配送路徑...",
+      "正在用咖啡賄賂 Vedal...",
+      "正在載入烏龜群..."
     ];
 
     preloadAssets(assets, (p) => {
@@ -248,9 +403,9 @@ const App: React.FC = () => {
   const handleMultiplayerEvent = useCallback((event: MultiplayerEvent) => {
     if (event.type === 'CONNECTED') {
       setMultiplayerId(event.peerId);
-      setVedalMessage("Online functionality ready!||連線功能準備就緒！");
+      setVedalMessage("連線功能準備就緒！");
     } else if (event.type === 'PLAYER_JOINED') {
-      setVedalMessage("A new drone has entered the airspace!||有新的無人機進入空域！");
+      setVedalMessage("有新的無人機進入空域！");
       if (mpManagerRef.current && !mpManagerRef.current.isHost) {
         setIsMultiplayerHost(false);
       }
@@ -277,7 +432,7 @@ const App: React.FC = () => {
           }
         } else if (event.data.type === 'KICKED') {
           console.log('You have been KICKED.');
-          setVedalMessage("You have been kicked by the host.||你已被房主踢出房間。");
+          setVedalMessage("你已被房主踢出房間。");
           setGameState(GameState.MENU);
           setJoinApproved(false);
         } else if (event.data.type === 'ROOM_SYNC') {
@@ -330,10 +485,10 @@ const App: React.FC = () => {
       } else if (event.data.type === 'SYNC_RATE') {
         if (event.data.rate) {
           setMpUpdateRate(event.data.rate);
-          setVedalMessage(`Host set sync rate to: ${event.data.rate.toUpperCase()}||房主調整同步頻率為: ${event.data.rate.toUpperCase()}`);
+          setVedalMessage(`房主調整同步頻率為: ${event.data.rate.toUpperCase()}`);
         }
       } else if (event.data.type === 'SYNC_SEED') {
-        setVedalMessage("Host synced the world seed!||房主同步了世界種子！");
+        setVedalMessage("房主同步了世界種子！");
         setCurrentSeed(event.data.seed);
         setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint on new seed/restart
         setGameState(prev => {
@@ -347,14 +502,14 @@ const App: React.FC = () => {
         setGameKey(k => k + 1);
         setGameState(GameState.PLAYING);
         setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint for all players
-        setVedalMessage("HOST STARTED THE GAME!||房主開始了遊戲！");
+        setVedalMessage("房主開始了遊戲！");
       } else if (event.data.type === 'GAME_RESTART') {
         // Go to Lobby instead of Playing
         setGameState(GameState.WAITING_LOBBY);
         setAllPlayersDead(false);
         setRoomLeaderboard([]);
         setLastCheckpoint({ x: 200, y: 860 });
-        setVedalMessage("HOST RESTARTED THE GAME!||房主重啟了遊戲！");
+        setVedalMessage("房主重啟了遊戲！");
       } else if (event.data.type === 'PLAYER_DEATH') {
         const playerId = event.data.id || event.id;
 
@@ -419,7 +574,7 @@ const App: React.FC = () => {
         // Authoritative GAME OVER from host
         setAllPlayersDead(true);
         setIsSpectating(false);
-        setVedalMessage("MISSION OVER. ALL DRONES LOST.||任務結束。所有無人機皆已墜毀。");
+        setVedalMessage("任務結束。所有無人機皆已墜毀。");
       } else if (event.data.type === 'GAME_RESTART') {
         // Host restarted the game - reset everything
         setAllPlayersDead(false);
@@ -427,11 +582,11 @@ const App: React.FC = () => {
         setRoomLeaderboard([]);
         setGameKey(k => k + 1);
         setGameState(GameState.WAITING_LOBBY);
-        setVedalMessage("Host restarted the game!||房主重新開始了遊戲！");
+        setVedalMessage("房主重新開始了遊戲！");
       } else if (event.data.type === 'JOIN_APPROVED') {
         setWaitingApproval(false);
         setJoinApproved(true);
-        setVedalMessage("HOST APPROVED YOUR ENTRY!||房主已批准加入！");
+        setVedalMessage("房主已批准加入！");
       } else if (event.data.type === 'PLAYER_READY') {
         // 玩家标记为准备
         setPlayerReadyStates(prev => {
@@ -455,7 +610,7 @@ const App: React.FC = () => {
       // Round 2 Fix: Forward all DATA events to GameCanvas's unique handler
       (window as any).gameRefs?.handleCanvasMpEvent?.(event);
     } else if (event.type === 'ERROR') {
-      setVedalMessage(`Error: ${event.message}||錯誤：${event.message}`);
+      setVedalMessage(`錯誤：${event.message}`);
       setJoinError(event.message);
       setWaitingApproval(false);
       setJoinApproved(false);
@@ -528,6 +683,18 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [gameState, isLayoutEditing]);
 
+  const handleLogout = () => {
+    localStorage.removeItem('neuro_drone_token');
+    setUser(null);
+    setIsAdmin(false);
+    setIsGuest(true);
+    // Keep local name for convenience but clear error since they are guest now (it will re-check)
+    setNameError(null);
+    setVedalMessage("已登出系統。");
+    // Re-trigger name check as guest
+    handleUpdateName(playerName);
+  };
+
   const togglePause = useCallback(() => {
     if (gameState === GameState.PLAYING) {
       if (multiplayerMode) {
@@ -560,6 +727,15 @@ const App: React.FC = () => {
   }, [togglePause, controlsConfig.keys.pause]);
 
   const handleStart = (seedOrEntry?: string | LeaderboardEntry) => {
+    // [SAFETY] Double check name conflict for guests
+    if (!user && nameError) {
+      setVedalMessage(`無法啟動任務：${nameError}`);
+      return;
+    }
+    // If somehow nameError persisted after login, clear it
+    if (user && nameError) {
+      setNameError(null);
+    }
     if (multiplayerMode && mpManagerRef.current) {
       mpManagerRef.current.myName = playerName;
     }
@@ -609,7 +785,7 @@ const App: React.FC = () => {
     // Multiplayer Flow: Enter Lobby first
     if (multiplayerMode) {
       if (!isMultiplayerHost && !joinApproved) {
-        setVedalMessage("Join a room and wait for approval!||請先加入房間並等待批准。");
+        setVedalMessage("請先加入房間並等待批准。");
         return;
       }
       // Generate seed if not already set (for host)
@@ -649,7 +825,7 @@ const App: React.FC = () => {
     if (gameState === GameState.GAME_OVER && multiplayerMode && trainX !== undefined && !isPermanentlyDead) {
       if (trainX >= lastCheckpoint.x) {
         setIsPermanentlyDead(true);
-        setVedalMessage("CHECKPOINT CONSUMED BY HYPE TRAIN! NO RESPAWN POSSIBLE.||存檔點已被發燒列車吞噬！無法重生。");
+        setVedalMessage("存檔點已被發燒列車吞噬！無法重生。");
       }
     }
   }, [gameState, multiplayerMode, lastCheckpoint.x, isPermanentlyDead]);
@@ -729,16 +905,16 @@ const App: React.FC = () => {
       if (trainX >= lastCheckpoint.x) {
         // [CASE 1] Checkpoint Consumed
         setIsPermanentlyDead(true);
-        setVedalMessage("CHECKPOINT CONSUMED BY HYPE TRAIN! NO RESPAWN POSSIBLE.||存檔點已被發燒列車吞噬！無法重生。");
+        setVedalMessage("存檔點已被發燒列車吞噬！無法重生。");
       } else if (trainX < lastCheckpoint.x - 400) {
         // [CASE 3] Safe -> Auto Respawn
         handleRespawn();
-        setVedalMessage("Neuro Re-fabricated! Checkpoint is safe.||Neuro 重組完成！存檔點安全。");
+        setVedalMessage("Neuro 重組完成！存檔點安全。");
         return;
       } else {
         // [CASE 2] Danger Zone (Train is approaching checkpoint)
         // Show Game Over screen to break the infinite death loop
-        setVedalMessage("WARNING: TRAIN INCOMING! RESPAWN CAREFULLY!||警告：火車逼近！請小心重生！");
+        setVedalMessage("警告：火車逼近！請小心重生！");
         // Fall through to normal GAME_OVER to allow manual respawn
       }
     }
@@ -746,19 +922,25 @@ const App: React.FC = () => {
     SoundManager.play('crash');
     setGameState(GameState.GAME_OVER);
     if (multiplayerMode) setIsSpectating(true); // 死亡后自动开启观战
-    setUrgentOrderProgress(null);
     setFinalDistance(finalDist);
     const penalty = 50;
-    setMoney(prev => Math.max(0, prev - penalty));
-    setVedalMessage(`Mission Failed. -$${penalty} fee.||任務失敗。扣除 $${penalty} 手續費。`);
+    setMoney(prev => {
+      const newVal = Math.max(0, prev - penalty);
+      saveGame(newVal); // Auto-save on death penalty
+      return newVal;
+    });
+    // Sync upgrades money state as well
+    setUpgrades(prev => ({ ...prev, money: Math.max(0, prev.money - penalty) }));
+
+    setVedalMessage(`任務失敗。扣除 $${penalty} 手續費。`);
 
     const TAUNTS: any = {
-      WALL: ["Bonk.||倒楣。", "Oof.||喔噗。", "Flat.||變扁了。"],
-      LASER: ["Grilled.||烤焦了。", "Zapped!!||中電！", "Medium Rare.||五分熟。"],
-      FUEL: ["Empty.||乾了。", "No Gas.||沒氣了。", "Walking Time?||該走路了？"],
-      CARGO: ["Broken.||打破了。", "Refunded.||退貨中。", "Vedal is mad.||主人要生氣了。"],
-      VOID: ["Lost.||迷失了。", "Deep.||深不可測。", "Bye bye.||掰掰。"],
-      TRAIN: ["Choo Choo!||火車快跑！", "Railed.||被輾過了。", "Ticket please?||請出示車票？"]
+      WALL: ["倒楣。", "喔噗。", "變扁了。"],
+      LASER: ["烤焦了。", "中電！", "五分熟。"],
+      FUEL: ["乾了。", "沒氣了。", "該走路了？"],
+      CARGO: ["打破了。", "退貨中。", "主人要生氣了。"],
+      VOID: ["迷失了。", "深不可測。", "掰掰。"],
+      TRAIN: ["火車快跑！", "被輾過了。", "請出示車票？"]
     };
     const DEATH_DISPLAY_NAMES: any = { WALL: "撞擊", LASER: "雷射", FUEL: "沒油", CARGO: "貨損", VOID: "深淵", TRAIN: "遭列車輾斃" };
 
@@ -912,12 +1094,18 @@ const App: React.FC = () => {
           >
             Neuro's Drone Delivery<br />
             <span className="text-3xl text-yellow-400">ENDLESS NIGHTMARE</span>
-            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-pink-500/50 opacity-0 group-hover:opacity-100 transition-opacity tracking-normal font-sans">CLICK FOR SETTINGS (點擊進入設置)</div>
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-pink-500/50 opacity-0 group-hover:opacity-100 transition-opacity tracking-normal font-sans">點擊進入設定</div>
           </h1>
+
+          {vedalMessage && (
+            <div className="bg-pink-900/30 border border-pink-500/50 px-4 py-2 rounded mb-4 text-[10px] text-pink-300 font-bold animate-pulse max-w-md text-center">
+              💬 {vedalMessage}
+            </div>
+          )}
 
           <div className="bg-slate-800 p-6 rounded-lg border border-slate-600 mb-6 max-w-md w-full">
             <div className="text-center mb-6 border-b border-slate-600 pb-4 cursor-pointer hover:bg-slate-700/30 rounded-lg p-2 transition-all active:scale-95 group relative" onClick={() => setShowLeaderboard(true)}>
-              <span className="text-cyan-500 font-bold text-lg tracking-widest group-hover:text-cyan-400">🏆 LONGEST FLIGHT (榜一) 🏆</span>
+              <span className="text-cyan-500 font-bold text-lg tracking-widest group-hover:text-cyan-400">🏆 最遠飛行紀錄 🏆</span>
               <div className="text-5xl text-white font-mono mt-2">{highScore}m</div>
               {isMultiplayerHost && mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
                 <div
@@ -930,31 +1118,39 @@ const App: React.FC = () => {
             </div>
 
             {/* Nickname Input moved here */}
-            <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700 mb-4">
-              <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase flex items-center">
-                Courier Name:
-                <InfoTooltip text="輸入您的外送員代號，這將顯示在排行榜與房間名單中。" />
-              </span>
-              <input
-                type="text"
-                placeholder="Enter Nickname"
-                value={playerName}
-                onChange={(e) => setPlayerName(e.target.value.slice(0, 12))}
-                className="flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono"
-              />
+            <div className="flex flex-col gap-1 mb-4">
+              <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700">
+                <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase flex items-center">
+                  外送員代號：
+                  <InfoTooltip text={!!user ? "外送員已報到，無法更改暱稱。" : "輸入您的外送員代號，這將顯示在排行榜與房間名單中。"} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="輸入暱稱..."
+                  value={playerName}
+                  onChange={(e) => handleUpdateName(e.target.value.slice(0, 12))}
+                  disabled={!!user}
+                  className={`flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono ${!!user ? 'opacity-50 cursor-not-allowed' : ''}`}
+                />
+              </div>
+              {nameError && (
+                <div className="text-red-500 text-[10px] font-bold animate-pulse px-3">
+                  ⚠️ {nameError}
+                </div>
+              )}
             </div>
 
             <div className="mt-6 flex flex-col gap-4">
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
                 <span className="text-white font-bold flex items-center">
-                  Multiplayer
+                  多人連線
                   <InfoTooltip text="開啟後可與線上其他外送員競爭或觀戰；關閉則進入純單機作業。" />
                 </span>
                 <button
                   onClick={() => setMultiplayerMode(!multiplayerMode)}
                   className={`px-4 py-1 rounded font-bold transition-colors ${multiplayerMode ? 'bg-cyan-500 text-white' : 'bg-slate-500 text-gray-300'}`}
                 >
-                  {multiplayerMode ? 'ENABLED (連機中)' : 'DISABLED (離線)'}
+                  {multiplayerMode ? '已開啟' : '已關閉'}
                 </button>
               </div>
 
@@ -962,7 +1158,7 @@ const App: React.FC = () => {
                 <div className="flex flex-col gap-2 p-2 bg-slate-900/50 rounded border border-cyan-900">
                   <div className="flex justify-between items-center h-8">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-cyan-500 font-mono">MY ID: {multiplayerId || 'CONNECTING...'}</span>
+                      <span className="text-xs text-cyan-500 font-mono">我的 ID: {multiplayerId || '連線中...'}</span>
                       {multiplayerId && (
                         <button
                           onClick={(e) => {
@@ -986,11 +1182,11 @@ const App: React.FC = () => {
                               document.execCommand('copy');
                               document.body.removeChild(el);
                             }
-                            setVedalMessage("ID Copied!||ID 已複製！");
+                            setVedalMessage("ID 已複製！");
                           }}
                           className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
                         >
-                          COPY
+                          複製
                         </button>
                       )}
                     </div>
@@ -1001,7 +1197,7 @@ const App: React.FC = () => {
                           mpManagerRef.current.host();
                           setIsMultiplayerHost(true);
                           setJoinApproved(true);
-                          setVedalMessage("Hosting room. Share your ID!||創建房間成功。分享你的 ID！");
+                          setVedalMessage("創建房間成功。分享你的 ID！");
                           // Initialize local participant list
                           setRoomParticipants([{ id: mpManagerRef.current.myId || 'HOST', name: playerName }]);
                           setPlayerReadyStates(new Map([[mpManagerRef.current.myId || 'HOST', true]])); // 房主默认准备
@@ -1010,14 +1206,14 @@ const App: React.FC = () => {
                       }}
                       className={`text-xs px-3 py-1.5 rounded font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${isMultiplayerHost ? 'bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
                     >
-                      {isMultiplayerHost ? '● HOSTING' : 'BE HOST'}
+                      {isMultiplayerHost ? '● 房主模式' : '創建房間'}
                     </button>
                     <InfoTooltip text="創建一個新的配送房間，並獲得一個專屬 ID 分享給好友。" />
                   </div>
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="Enter Room ID (e.g. 5X7B)..."
+                      placeholder="輸入房間 ID (例如 5X7B)..."
                       value={roomToJoin}
                       onChange={(e) => setRoomToJoin(e.target.value.toUpperCase())}
                       className="flex-1 bg-slate-800 text-xs p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono"
@@ -1033,7 +1229,7 @@ const App: React.FC = () => {
                       }}
                       className="bg-pink-600 px-4 py-1 text-xs rounded font-bold hover:bg-pink-500 active:scale-95 cursor-pointer text-white flex items-center gap-1"
                     >
-                      JOIN
+                      加入
                       <InfoTooltip text="輸入好友的房間 ID 並請求加入其配送任務。" position="right" />
                     </button>
                   </div>
@@ -1045,7 +1241,7 @@ const App: React.FC = () => {
                     }}
                     className="bg-purple-600 hover:bg-purple-500 text-white text-xs py-1 rounded font-bold mt-1 flex items-center justify-center gap-1"
                   >
-                    BROWSE ROOMS (瀏覽房間)
+                    瀏覽房間
                     <InfoTooltip text="啟動區域掃描，尋找當前所有可加入的公開配送房間。" />
                   </button>
                 </div>
@@ -1054,40 +1250,51 @@ const App: React.FC = () => {
 
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
                 <span className="text-white font-bold flex items-center">
-                  Mode
+                  操控模式
                   <InfoTooltip text="切換操作模式。簡單模式有無人機自動找正；普通模式為全物理手動控制。" />
                 </span>
                 <button onClick={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')} className={`px-4 py-1 rounded font-bold transition-colors ${difficulty === 'EASY' ? 'bg-green-500 text-white' : 'bg-slate-500 text-gray-300'}`}>
-                  {difficulty === 'EASY' ? 'EASY (MOUSE/JOY)' : 'NORMAL (WASD)'}
+                  {difficulty === 'EASY' ? '簡單 (滑鼠/搖桿)' : '普通 (WASD)'}
                 </button>
               </div>
 
               <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
                 <span className="text-white font-bold flex items-center">
-                  Mobile Controls
+                  手機操控介面
                   <InfoTooltip text="為觸控螢幕優化介面，開啟後會顯示虛擬搖桿與按鍵。" />
                 </span>
                 <button onClick={() => setIsMobileMode(!isMobileMode)} className={`w-16 h-8 rounded-full transition-colors relative border-2 border-slate-700 ${isMobileMode ? 'bg-pink-500' : 'bg-slate-700'}`}>
                   <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
                 </button>
               </div>
+
+              {/* ADMIN: USER MANAGEMENT BUTTON */}
+              {isAdmin && (
+                <button
+                  onClick={() => setShowUserMgmt(true)}
+                  className="w-full bg-purple-900/50 hover:bg-purple-800 text-purple-200 font-bold py-2 rounded border border-purple-500/50 transition-all active:scale-95 flex items-center justify-center gap-2 mt-2 group shadow-[0_0_10px_rgba(168,85,247,0.2)]"
+                >
+                  <span className="group-hover:animate-spin">🛡️</span>
+                  DATABASE: USER MANAGEMENT
+                </button>
+              )}
             </div>
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
             {multiplayerMode && !isMultiplayerHost && waitingApproval ? (
               <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-yellow-500 animate-pulse text-yellow-400 font-bold tracking-widest">
-                WAITING FOR HOST APPROVAL... (等待房主批准...)
+                正在等待房主批准...
               </div>
             ) : multiplayerMode && !isMultiplayerHost && !joinApproved ? (
               <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-cyan-500 text-cyan-400 font-bold tracking-widest">
-                JOIN A ROOM TO PLAY (請加入房間後開始)
+                請先加入房間
               </div>
             ) : (
               <>
                 {joinApproved && !isMultiplayerHost && (
                   <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-green-400 font-bold animate-bounce whitespace-nowrap">
-                    ✓ APPROVED! SELECT YOUR DRONE
+                    ✓ 已批准！請選擇無人機
                   </div>
                 )}
                 <div className="flex items-center gap-2 flex-1">
@@ -1109,7 +1316,7 @@ const App: React.FC = () => {
                     disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                     style={{ WebkitTapHighlightColor: 'rgba(236, 72, 153, 0.3)', touchAction: 'manipulation' }}
                   >
-                    PLAY AS NEURO
+                    使用 NEURO 出擊
                   </button>
                   <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" position="right" />
                 </div>
@@ -1132,7 +1339,7 @@ const App: React.FC = () => {
                     disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
                     style={{ WebkitTapHighlightColor: 'rgba(220, 38, 38, 0.3)', touchAction: 'manipulation' }}
                   >
-                    PLAY AS EVIL
+                    使用 EVIL 出擊
                   </button>
                   <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" position="right" />
                 </div>
@@ -1143,13 +1350,60 @@ const App: React.FC = () => {
       )
       }
 
-      {
-        showLeaderboard && (
-          <div className="absolute inset-0 z-[100] flex items-center justify-center p-4 sm:p-20 pointer-events-auto">
-            <Leaderboard entries={leaderboard} onClose={() => setShowLeaderboard(false)} onChallengeSeed={(seed) => { setShowLeaderboard(false); handleStart(seed); }} />
+      {showLeaderboard && (
+        <div className="absolute inset-0 z-[100] pointer-events-auto">
+          <Leaderboard
+            entries={leaderboard}
+            onClose={() => setShowLeaderboard(false)}
+            onChallengeSeed={(entry) => handleStart(entry)}
+            currentSeed={currentSeed}
+            isAdmin={isAdmin}
+            token={user?.token}
+            onEntryDeleted={() => {
+              fetch('/api/leaderboard')
+                .then(res => res.json())
+                .then(setLeaderboard);
+            }}
+          />
+        </div>
+      )}
+
+      {/* USER MANAGEMENT MODAL */}
+      {showUserMgmt && isAdmin && (
+        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="w-full h-full max-w-4xl max-h-[90vh]">
+            <UserManagement
+              token={user?.token || ''}
+              onClose={() => setShowUserMgmt(false)}
+              onUserDeleted={() => {
+                fetch('/api/leaderboard')
+                  .then(res => res.json())
+                  .then(setLeaderboard);
+              }}
+            />
           </div>
-        )
-      }
+        </div>
+      )}
+
+      {/* LOGIN MODAL */}
+      {showLogin && !isGuest && !user && (
+        <LoginModal
+          onLogin={(u) => {
+            setUser(u);
+            setMoney(u.saveData.money);
+            setShowLogin(false);
+            setPlayerName(u.username); // 使用登录名作为玩家名
+            setIsAdmin(['Wheel', 'Admin', 'Neuro'].includes(u.username));
+            setNameError(null);
+            localStorage.setItem('neuro_drone_token', u.token);
+            localStorage.setItem('neuro_drone_name', u.username);
+          }}
+          onGuest={() => {
+            setIsGuest(true);
+            setShowLogin(false);
+          }}
+        />
+      )}
 
       {/* Room Browser Overlay */}
       {
@@ -1213,17 +1467,17 @@ const App: React.FC = () => {
                 <NeuroFace status="idle" persona={persona} />
               </div>
               <div className="absolute -bottom-10 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-900/90 text-cyan-400 text-[10px] px-2 py-1 rounded border border-cyan-500 font-bold tracking-widest whitespace-nowrap z-10 pointer-events-none">
-                CLICK TO CHANGE AVATAR / SETTINGS
+                點擊更換頭像 / 設定
               </div>
             </div>
 
             {isMultiplayerHost ? (
               <div className="flex flex-col items-center gap-6 w-full max-w-md">
-                <h2 className="text-5xl font-bold text-green-400 animate-pulse font-vt323 tracking-widest mb-2">LOBBY (已就緒)</h2>
+                <h2 className="text-5xl font-bold text-green-400 animate-pulse font-vt323 tracking-widest mb-2">多人大廳</h2>
 
                 <div className="w-full bg-slate-800/80 p-5 rounded-xl border-2 border-slate-700 shadow-xl">
                   <h3 className="text-cyan-400 font-bold border-b-2 border-slate-700 pb-3 mb-4 tracking-widest text-center uppercase">
-                    READY PARTICIPANTS ({roomParticipants.length})
+                    已就緒玩家 ({roomParticipants.length})
                   </h3>
                   <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
                     {roomParticipants.length > 0 ? (
@@ -1240,11 +1494,11 @@ const App: React.FC = () => {
                               <span className="text-yellow-500">⏳ 未準備</span>
                             )}
                           </div>
-                          {p.id === multiplayerId && <span className="absolute top-1 right-1 text-[8px] bg-cyan-900/80 text-cyan-400 px-1 rounded border border-cyan-800 font-bold">YOU</span>}
+                          {p.id === multiplayerId && <span className="absolute top-1 right-1 text-[8px] bg-cyan-900/80 text-cyan-400 px-1 rounded border border-cyan-800 font-bold">我</span>}
                         </div>
                       ))
                     ) : (
-                      <div className="col-span-2 text-center text-slate-500 py-4 italic">Waiting for room sync...</div>
+                      <div className="col-span-2 text-center text-slate-500 py-4 italic">等待連線同步...</div>
                     )}
                   </div>
                 </div>
@@ -1273,7 +1527,7 @@ const App: React.FC = () => {
                     }`}
                 >
                   {roomParticipants.every(p => playerReadyStates.get(p.id) === true)
-                    ? 'START GAME (開始)'
+                    ? '開始遊戲'
                     : `等待玩家準備 (${roomParticipants.filter(p => playerReadyStates.get(p.id)).length}/${roomParticipants.length})`
                   }
                 </button>
@@ -1282,7 +1536,7 @@ const App: React.FC = () => {
                   onClick={() => setShowSettings(true)}
                   className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
-                  ⚙️ SETTINGS (系統設定)
+                  ⚙️ 系統設定
                 </button>
 
                 {mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
@@ -1290,16 +1544,16 @@ const App: React.FC = () => {
                     onClick={() => setShowSettings(true)}
                     className="w-full bg-yellow-600/80 hover:bg-yellow-500 text-black font-bold py-2 rounded border-2 border-yellow-400 animate-pulse flex items-center justify-center gap-2"
                   >
-                    ⚠️ {mpManagerRef.current.pendingRequests.length} PENDING REQUESTS
+                    ⚠️ {mpManagerRef.current.pendingRequests.length} 待處理請求
                   </button>
                 )}
               </div>
             ) : (
               <div className="flex flex-col items-center gap-6 w-full max-w-sm">
                 <div className="flex flex-col items-center gap-4">
-                  <h2 className="text-5xl font-bold text-cyan-400 animate-pulse font-vt323 tracking-widest mb-4">WAITING FOR HOST...</h2>
+                  <h2 className="text-5xl font-bold text-cyan-400 animate-pulse font-vt323 tracking-widest mb-4">等待房主開始...</h2>
                   <div className="bg-slate-800 p-6 rounded-lg border-2 border-slate-600 text-center w-full">
-                    <p className="text-slate-400 text-sm uppercase tracking-widest mb-2">CURRENT SECTOR</p>
+                    <p className="text-slate-400 text-sm uppercase tracking-widest mb-2">當前區域 (種子)</p>
                     <p className="text-2xl font-mono font-bold text-white mb-4">{currentSeed}</p>
                     <div className="flex gap-2 justify-center">
                       <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
@@ -1313,7 +1567,7 @@ const App: React.FC = () => {
                   onClick={() => setShowSettings(true)}
                   className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
-                  ⚙️ SETTINGS (系統設定)
+                  ⚙️ 系統設定
                 </button>
               </div>
             )}
@@ -1325,10 +1579,10 @@ const App: React.FC = () => {
         pendingScore && (
           <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-md pointer-events-auto p-4">
             <div className={`bg-slate-800 border-4 border-cyan-500 p-8 rounded-xl shadow-2xl max-w-sm w-full animate-bounce-short`}>
-              <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ NEW RECORD ⭐</h2>
-              <input autoFocus type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value.slice(0, 12))} placeholder="Name..." className="w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold mb-4 outline-none focus:border-cyan-500" />
+              <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ 新紀錄 ⭐</h2>
+              <input autoFocus type="text" value={playerName} onChange={(e) => setPlayerName(e.target.value.slice(0, 12))} placeholder="輸入名字..." className="w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold mb-4 outline-none focus:border-cyan-500" />
               <div className="flex gap-2">
-                <button onClick={() => saveToLeaderboard(playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">SAVE</button>
+                <button onClick={() => saveToLeaderboard(playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">保存</button>
                 <button onClick={() => {
                   setPendingScore(null);
                   if (postScoreAction === 'RESTART') handleRestartFull();
@@ -1336,7 +1590,7 @@ const App: React.FC = () => {
                     setShowSettings(false);
                     setGameState(GameState.MENU);
                   }
-                }} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-4 rounded">SKIP</button>
+                }} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-4 rounded">跳過</button>
               </div>
             </div>
           </div>
@@ -1350,7 +1604,7 @@ const App: React.FC = () => {
             {pendingRequests.map(req => (
               <div key={req.id} className="bg-slate-900/90 border-2 border-yellow-500 p-4 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.4)] backdrop-blur-md animate-slide-in-right max-w-xs border-l-8">
                 <div className="flex justify-between items-start mb-2">
-                  <div className="font-bold text-yellow-500 text-sm tracking-widest uppercase">New Join Request</div>
+                  <div className="font-bold text-yellow-500 text-sm tracking-widest uppercase">新的加入請求</div>
                   <div className="text-[10px] text-slate-500 font-mono">ID: {req.id.slice(-4)}</div>
                 </div>
                 <div className="text-white text-lg font-bold mb-4 flex items-center gap-2">
@@ -1365,7 +1619,7 @@ const App: React.FC = () => {
                     }}
                     className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-sm transition-all active:scale-95"
                   >
-                    ACCEPT
+                    接受
                   </button>
                   <button
                     onClick={() => {
@@ -1374,7 +1628,7 @@ const App: React.FC = () => {
                     }}
                     className="bg-red-600/30 hover:bg-red-600 text-red-200 py-2 px-4 rounded-lg text-sm border border-red-500/50 transition-all active:scale-95"
                   >
-                    REJECT
+                    拒絕
                   </button>
                 </div>
                 <button
@@ -1384,7 +1638,7 @@ const App: React.FC = () => {
                   }}
                   className="w-full text-center text-slate-500 text-[10px] mt-2 underline hover:text-slate-300"
                 >
-                  Manage in Admin Menu
+                  前往管理選單
                 </button>
               </div>
             ))}
@@ -1396,23 +1650,23 @@ const App: React.FC = () => {
         gameState === GameState.CHECKPOINT_SHOP && (
           <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto">
             <div className="bg-slate-800 border-4 border-green-500 p-8 rounded-lg text-center shadow-2xl">
-              <h2 className="text-4xl font-bold text-green-400 mb-2">CHECKPOINT</h2>
+              <h2 className="text-4xl font-bold text-green-400 mb-2">存檔點</h2>
               <div className="flex flex-wrap justify-center gap-4 mb-8">
                 <div className="relative group flex items-center">
-                  <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">FUEL $10</button>
+                  <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">補充燃料 $10</button>
                   <InfoTooltip text="緊急補充全部燃料。燃料耗盡將導致配送失敗。" position="bottom" />
                 </div>
                 <div className="relative group flex items-center">
-                  <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">FIX $20</button>
+                  <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">緊急維修 $20</button>
                   <InfoTooltip text="修復無人機機身損害。血量歸零將導致配送失敗。" position="bottom" />
                 </div>
                 <div className="relative group flex items-center">
-                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">UPGRADE</button>
+                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">升級工坊</button>
                   <InfoTooltip text="前往科學家 Vedal 的工作坊，升級硬體或購買特殊裝備。" position="bottom" />
                 </div>
               </div>
               <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl flex items-center gap-2">
-                LAUNCH
+                出發
                 <InfoTooltip text="完成補給，即刻出發！" />
               </button>
             </div>
@@ -1425,20 +1679,20 @@ const App: React.FC = () => {
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white z-50 backdrop-blur-sm pointer-events-auto">
             <div className="mb-6 transform scale-150 cursor-pointer hover:brightness-125 active:scale-140 transition-all" onClick={() => setShowSettings(true)}>
               <NeuroFace status="dead" persona={persona} />
-              <div className="absolute -bottom-4 right-0 bg-cyan-600 text-[10px] px-1 rounded border border-cyan-400 font-bold opacity-0 hover:opacity-100 transition-opacity">SETTINGS</div>
+              <div className="absolute -bottom-4 right-0 bg-cyan-600 text-[10px] px-1 rounded border border-cyan-400 font-bold opacity-0 hover:opacity-100 transition-opacity">設定</div>
             </div>
-            <h1 className="text-6xl text-red-500 font-bold mb-2 tracking-widest">WASTED</h1>
+            <h1 className="text-6xl text-red-500 font-bold mb-2 tracking-widest">任務失敗</h1>
             <div className="text-center mb-6">
               <h2 className="text-2xl font-bold text-red-400 mb-1">
                 {deathDetails.reasonDisplay}
               </h2>
               <div className="text-xl font-bold text-slate-300 flex items-center justify-center gap-4">
-                <span>DISTANCE: <span className="text-white">{finalDistance}m</span></span>
+                <span>距離: <span className="text-white">{finalDistance}m</span></span>
                 <span className="text-cyan-400 border-l border-slate-600 pl-4">
-                  RANK: #{leaderboard.filter(e => e.distance > finalDistance).length + 1}
+                  排名: #{leaderboard.filter(e => e.distance > finalDistance).length + 1}
                 </span>
               </div>
-              <p className="text-slate-400 mt-1">TIME: {Math.floor(gameTime)}s</p>
+              <p className="text-slate-400 mt-1">時間: {Math.floor(gameTime)}s</p>
               <p className="text-xl text-yellow-500 font-vt323 tracking-wider italic mt-2">
                 {deathDetails.taunt.split('||')[1] || deathDetails.taunt.split('||')[0]}
               </p>
@@ -1446,13 +1700,13 @@ const App: React.FC = () => {
             <div className="mt-8 flex flex-wrap justify-center gap-6">
               {!multiplayerMode ? (
                 <>
-                  <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">RESPAWN (繼續)</button>
-                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore({ distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">RESTART (重開)</button>
+                  <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">重生 (繼續)</button>
+                  <button onClick={() => { if (finalDistance > 0) { setPostScoreAction('RESTART'); setPendingScore({ distance: finalDistance, time: gameTime, trajectory: currentTrajectory, cargoTrajectory: currentCargoTrajectory }); } else handleRestartFull(); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
                 </>
               ) : (
-                <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">SPECTATE (觀戰)</button>
+                <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">觀戰</button>
               )}
-              <button onClick={handleBackToMenu} className="py-3 px-8 text-gray-400 underline">Menu</button>
+              <button onClick={handleBackToMenu} className="py-3 px-8 text-gray-400 underline">主選單</button>
             </div>
           </div>
         )
@@ -1463,10 +1717,10 @@ const App: React.FC = () => {
         multiplayerMode && allPlayersDead && (
           <div className="absolute inset-0 z-[250] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md text-white pointer-events-auto">
             <div className="bg-slate-800 border-4 border-red-500 p-8 rounded-xl max-w-2xl w-full shadow-2xl">
-              <h1 className="text-5xl font-bold text-red-400 mb-6 text-center tracking-widest font-vt323">GAME OVER</h1>
+              <h1 className="text-5xl font-bold text-red-400 mb-6 text-center tracking-widest font-vt323">遊戲結束 (GAME OVER)</h1>
 
               <div className="bg-slate-900 p-6 rounded-lg mb-6">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-4 border-b border-slate-600 pb-2">ROOM LEADERBOARD</h2>
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4 border-b border-slate-600 pb-2">房間排行榜</h2>
                 <div className="space-y-2">
                   {roomLeaderboard
                     .sort((a, b) => b.distance - a.distance)
@@ -1487,7 +1741,7 @@ const App: React.FC = () => {
                           </span>
                           <div>
                             <div className="font-bold text-white">
-                              {player.id === (multiplayerId || 'ME') ? 'YOU' : player.id.slice(-4)}
+                              {player.id === (multiplayerId || 'ME') ? '我' : player.id.slice(-4)}
                             </div>
                             <div className="text-xs text-slate-400">{player.persona}</div>
                           </div>
@@ -1521,7 +1775,7 @@ const App: React.FC = () => {
                       }}
                       className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl tracking-widest shadow-lg"
                     >
-                      RESTART GAME (重新開始)
+                      重新開始 (RESTART GAME)
                     </button>
                     <button
                       onClick={() => {
@@ -1577,44 +1831,46 @@ const App: React.FC = () => {
         )
       }
 
-      <GameCanvas
-        key={gameKey}
-        gameState={gameState}
-        setGameState={setGameState}
-        persona={persona}
-        setPersona={setPersona}
-        difficulty={difficulty}
-        isMobileMode={isMobileMode}
-        upgrades={upgrades}
-        controls={controlsConfig}
-        equippedItem={equippedItem}
-        addMoney={(amt) => setMoney(prev => prev + amt)}
-        onCrash={handleCrash}
-        setFaceStatus={setFaceStatus}
-        setVedalMessage={setVedalMessage}
-        setStats={(hp, fuel, cargoHp, distance, distToNext, trainX) => setStats(hp, fuel, cargoHp, distance, distToNext, trainX)}
-        lastCheckpoint={lastCheckpoint}
-        setLastCheckpoint={setLastCheckpoint}
-        respawnToken={respawnToken}
-        onGrantRandomUpgrade={handleRandomUpgrade}
-        setUrgentOrderProgress={setUrgentOrderProgress}
-        onUpdateTrajectory={(traj, cargoTraj) => {
-          setCurrentTrajectory(traj);
-          if (cargoTraj) setCurrentCargoTrajectory(cargoTraj);
-        }}
-        seed={currentSeed}
-        ghostData={ghostData}
-        isLayoutEditing={isLayoutEditing}
-        multiplayer={{
-          isActive: multiplayerMode,
-          manager: mpManagerRef.current,
-          remotePlayers
-        }}
-        isSpectating={isSpectating}
-        spectatorTargetId={spectatorTargetId}
-        setSpectatorTargetId={setSpectatorTargetId}
-        mpUpdateRate={mpUpdateRate}
-      />
+      <div className="absolute inset-0 z-0">
+        <GameCanvas
+          key={gameKey}
+          gameState={gameState}
+          setGameState={setGameState}
+          persona={persona}
+          setPersona={setPersona}
+          difficulty={difficulty}
+          isMobileMode={isMobileMode}
+          upgrades={upgrades}
+          controls={controlsConfig}
+          equippedItem={equippedItem}
+          addMoney={(amt) => setMoney(prev => prev + amt)}
+          onCrash={handleCrash}
+          setFaceStatus={setFaceStatus}
+          setVedalMessage={setVedalMessage}
+          setStats={(hp, fuel, cargoHp, distance, distToNext, trainX) => setStats(hp, fuel, cargoHp, distance, distToNext, trainX)}
+          lastCheckpoint={lastCheckpoint}
+          setLastCheckpoint={setLastCheckpoint}
+          respawnToken={respawnToken}
+          onGrantRandomUpgrade={handleRandomUpgrade}
+          setUrgentOrderProgress={setUrgentOrderProgress}
+          onUpdateTrajectory={(traj, cargoTraj) => {
+            setCurrentTrajectory(traj);
+            if (cargoTraj) setCurrentCargoTrajectory(cargoTraj);
+          }}
+          seed={currentSeed}
+          ghostData={ghostData}
+          isLayoutEditing={isLayoutEditing}
+          multiplayer={useMemo(() => ({
+            isActive: multiplayerMode,
+            manager: mpManagerRef.current,
+            remotePlayers
+          }), [multiplayerMode, remotePlayers])}
+          isSpectating={isSpectating}
+          spectatorTargetId={spectatorTargetId}
+          setSpectatorTargetId={setSpectatorTargetId}
+          mpUpdateRate={mpUpdateRate}
+        />
+      </div>
 
       <SettingsOverlay
         isOpen={showSettings}
@@ -1656,14 +1912,7 @@ const App: React.FC = () => {
           }
         }}
         playerName={playerName}
-        onUpdateName={(name) => {
-          setPlayerName(name);
-          if (multiplayerMode && mpManagerRef.current && !isMultiplayerHost) {
-            mpManagerRef.current.broadcast({ type: 'PLAYER_READY' });
-          } else if (isMultiplayerHost) {
-            setPlayerReadyStates(prev => new Map(prev).set(mpManagerRef.current?.myId || 'HOST', true));
-          }
-        }}
+        onUpdateName={handleUpdateName}
         roomParticipants={roomParticipants}
         persona={persona}
         onUpdatePersona={(p) => {
@@ -1678,6 +1927,11 @@ const App: React.FC = () => {
         onToggleMobileMode={() => setIsMobileMode(!isMobileMode)}
         onForceRestart={handleForceRestart}
         initialTab={settingsTab}
+        isAdmin={isAdmin}
+        isLoggedIn={!!user}
+        nameError={nameError}
+        vedalMessage={vedalMessage}
+        onLogout={handleLogout}
       />
 
       {
@@ -1706,8 +1960,11 @@ const App: React.FC = () => {
               vedalMessage={vedalMessage}
               isMobile={isMobileMode}
               urgentOrderProgress={urgentOrderProgress}
-              onAvatarClick={togglePause}
+              onAvatarClick={() => setShowSettings(true)}
               isFullscreen={isFullscreen}
+              isAdmin={isAdmin}
+              userName={playerName}
+              nameError={nameError}
             />
             {isMobileMode && (
               <MobileControls
@@ -1732,9 +1989,20 @@ const App: React.FC = () => {
         )
       }
 
-      {/* Version Tag */}
-      <div className="absolute bottom-1 left-1 z-[1000] text-[8px] text-white/20 font-mono tracking-tighter select-none pointer-events-none uppercase">
-        Alpha 1.3k
+      {/* 全域金幣顯示 (Global Money Badge) */}
+      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex flex-col items-end">
+        <div className="bg-slate-900/90 border-2 border-yellow-500 px-4 py-2 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.3)] backdrop-blur-md flex items-center gap-2 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
+          <span className="text-2xl animate-pulse">💰</span>
+          <div className="flex flex-col">
+            <span className="text-[10px] text-yellow-500/70 font-bold leading-none uppercase tracking-widest">Balance</span>
+            <span className="text-2xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Version Tag (超小字) */}
+      <div className="absolute bottom-1 left-1 z-[1000] text-[8px] text-white/10 select-none pointer-events-none font-sans uppercase tracking-tighter">
+        Alpha 1.4g (TC)
       </div>
     </div >
   );

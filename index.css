@@ -79,3 +79,12 @@
     opacity: 0.3;
   }
 }
+
+/* 隱藏捲軸但保留捲動功能 */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
