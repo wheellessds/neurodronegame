@@ -38,3 +38,8 @@ export const CHUNK_SIZE = 1200; // How wide each generated section is
 export const CHECKPOINT_INTERVAL = 3000; // Distance between shops
 export const RENDER_DISTANCE = 3000; // How far ahead to generate
 export const PRUNE_DISTANCE = 2000; // How far behind to delete
+
+// High Speed Effects Constants
+export const HIGH_SPEED_THRESHOLD = 15; // Measured in physics speed (UI speed = speed * 10)
+export const HIGH_SPEED_DELAY = 60; // Frames (approx 1s at 60fps) to start
+export const HIGH_SPEED_COOLDOWN = 12; // Frames (approx 0.2s at 60fps) to stop

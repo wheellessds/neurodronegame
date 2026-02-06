@@ -367,3 +367,4 @@ export default defineConfig(({ mode }) => {
     resolve: { alias: { '@': path.resolve(__dirname, '.') } }
   };
 });
+// Force restart to reload users.json

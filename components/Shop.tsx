@@ -21,133 +21,210 @@ export const Shop: React.FC<ShopProps> = ({ money, diamonds, upgrades, buyUpgrad
   const getCost = (level: number) => Math.floor(50 * Math.pow(1.5, level));
 
   const upgradesList = [
-    { key: 'engineLevel', name: 'Neuro Thrusters (推進器)', desc: '增加推力。小心別撞牆！ (Increases thrust)', info: '提升無人機的推動力，能飛得更快，但操作難度也會隨之增加。' },
-    { key: 'tankLevel', name: 'Copium Tank (燃料箱)', desc: '攜帶更多燃料以進行長途飛行。 (More fuel)', info: '提升燃料儲存量，讓飛行時間更長，減少斷油機率。' },
-    { key: 'hullLevel', name: 'Turtle Shell (機體裝甲)', desc: '增加無人機耐撞度。 (Drone HP)', info: '提高無人機機身的血量，能夠承受更多次輕微碰撞。' },
-    { key: 'cargoLevel', name: 'Cargo Cage (貨物保護架)', desc: '增加蘭姆酒的耐撞度。 (Cargo HP)', info: '提高蘭姆酒貨箱的血量，防止脆弱的貨物在碰撞中破碎。' },
-    { key: 'cableLevel', name: 'Elastic Rope (彈性繩)', desc: '減少拉扯無人機的力道。 (Dampens force)', info: '使繩索更具彈性，緩衝貨物晃動對無人機造成的物理干擾。' },
+    { key: 'engineLevel', name: 'Neuro Thrusters', sub: '推進器', desc: 'Increases thrust power.', info: '提升推動力，飛得更快，但更難控制。' },
+    { key: 'tankLevel', name: 'Copium Tank', sub: '燃料箱', desc: 'Max fuel capacity.', info: '增加最大燃料上限，減少斷油危機。' },
+    { key: 'hullLevel', name: 'Turtle Shell', sub: '機體裝甲', desc: 'Max health points.', info: '增加無人機生命值，能承受更多撞擊。' },
+    { key: 'cargoLevel', name: 'Cargo Cage', sub: '貨物保護', desc: 'Cargo durability.', info: '保護你的蘭姆酒不被撞碎。' },
+    { key: 'cableLevel', name: 'Elastic Rope', sub: '彈性繩', desc: 'Physics damping.', info: '減少繩索拉扯對無人機的影響。' },
   ];
 
   const equipmentList = [
-    { id: 'MAGNET', name: 'Magnet Core (磁力核心)', cost: 300, desc: '增加金幣收集範圍。 (Increased coin range)', info: '磁力自動吸引周圍的金幣，不需要精準路過就能收集。' },
-    { id: 'ARMOR', name: 'Shock Absorber (避震系統)', cost: 500, desc: '減少 30% 碰撞傷害。 (Reduce 30% damage)', info: '避震系統可減少碰撞造成的損傷，提高生存率。' },
-    { id: 'ECO_CHIP', name: 'Eco Chip (節能晶片)', cost: 400, desc: '減少 20% 燃料消耗。 (Reduce 20% fuel usage)', info: '優化燃料效率，在進行高速推進時消耗更少的油量。' },
+    { id: 'MAGNET', name: 'MAGNET CORE', sub: '磁力核心', cost: 300, desc: 'Auto-collect coins.', info: '自動吸取周圍的金幣。' },
+    { id: 'ARMOR', name: 'SHOCK ABSORBER', sub: '避震系統', cost: 500, desc: '-30% Collision Dmg.', info: '減少 30% 撞擊傷害。' },
+    { id: 'ECO_CHIP', name: 'ECO CHIP', sub: '節能晶片', cost: 400, desc: '-20% Fuel Usage.', info: '減少 20% 燃料消耗。' },
   ];
 
   return (
-    <div className="absolute inset-0 bg-slate-900 flex flex-col items-center p-4 md:p-8 text-white z-20 overflow-y-auto">
-      <div className="flex flex-col items-center w-full max-w-4xl py-8">
-        <h1 className="text-4xl mb-4 font-bold text-purple-400 animate-pulse text-center">對接與工作坊</h1>
-        <p className="text-xl mb-8 bg-slate-800 px-6 py-2 rounded-full border border-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.2)] flex items-center gap-6">
-          <span>持有金額: <span className="text-yellow-400 font-bold">${money}</span></span>
-          <span className="text-slate-600">|</span>
-          <span>鑽石餘額: <span className="text-cyan-400 font-bold">💎{diamonds}</span></span>
-        </p>
+    <div className="absolute inset-0 z-50 flex flex-col items-center justify-start bg-slate-950/85 backdrop-blur-sm text-white overflow-hidden font-sans select-none pt-20 pb-4">
+      {/* Background Grid */}
+      <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(6,182,212,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(circle_at_center,transparent_0%,#020617_90%)]" />
 
-        {/* Diamond Exchange Section */}
-        <div className="w-full bg-slate-800/50 border-2 border-cyan-500/30 p-4 rounded-xl mb-8 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl animate-bounce">💎</span>
-            <div>
-              <h3 className="text-xl text-cyan-400 font-bold">高級貨幣兌換 (DIAMOND EXCHANGE)</h3>
-              <p className="text-slate-400 text-sm">將 1000 金幣壓縮為 1 顆永恆鑽石。鑽石在任何情況下皆不扣除。</p>
+      {/* Header */}
+      <div className="relative z-10 w-full max-w-6xl px-8 flex justify-between items-end mb-8 border-b-2 border-cyan-500/30 pb-4">
+        <div>
+          <h1 className="text-5xl font-black italic tracking-tighter text-white drop-shadow-[0_0_15px_rgba(6,182,212,0.5)]">
+            WORKSHOP <span className="text-cyan-500">//</span> DOCK
+          </h1>
+          <div className="flex items-center gap-2 mt-2">
+            <div className="h-1 w-24 bg-cyan-500/50 skew-x-[-12deg]" />
+            <span className="text-xs font-mono text-cyan-400 tracking-[0.3em]">SYSTEM UPGRADES & OUTFITTING</span>
+          </div>
+        </div>
+
+        {/* Currency Display */}
+        <div className="flex gap-4">
+          {/* Money */}
+          <div className="bg-slate-900/80 border-l-4 border-yellow-500 px-6 py-2 skew-x-[-12deg] shadow-[0_0_20px_rgba(234,179,8,0.2)]">
+            <div className="skew-x-[12deg] text-right leading-none">
+              <div className="text-[10px] text-yellow-500 font-bold tracking-widest mb-1">CREDITS</div>
+              <div className="text-3xl font-black italic text-white font-mono">${money.toLocaleString()}</div>
             </div>
           </div>
-          <button
-            onClick={onExchangeDiamond}
-            disabled={money < 1000}
-            className={`py-3 px-8 rounded-lg font-bold text-lg transition-all active:scale-95 ${money >= 1000 ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-slate-700 text-slate-500 cursor-not-allowed grayscale'}`}
-          >
-            兌換 💎1 ($1000)
-          </button>
+          {/* Diamonds */}
+          <div className="bg-slate-900/80 border-r-4 border-cyan-500 px-6 py-2 skew-x-[-12deg] shadow-[0_0_20px_rgba(6,182,212,0.2)]">
+            <div className="skew-x-[12deg] text-left leading-none">
+              <div className="text-[10px] text-cyan-400 font-bold tracking-widest mb-1">E-DIAMONDS</div>
+              <div className="text-3xl font-black italic text-white font-mono flex items-center gap-2">
+                <span>💎</span>{diamonds}
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
 
-        {/* Basic Upgrades */}
-        <h2 className="text-2xl text-cyan-400 font-bold mb-4 self-start border-b border-cyan-500 w-full pb-2">系統升級 (SYSTEM UPGRADES)</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full mb-8">
-          {upgradesList.map((item) => {
-            const level = upgrades[item.key as keyof UpgradeStats];
-            const cost = getCost(level);
-            const canAfford = money >= cost;
+      <div className="relative z-10 w-full max-w-6xl px-8 flex-1 overflow-y-auto no-scrollbar grid grid-cols-1 lg:grid-cols-12 gap-8 pb-20">
 
-            return (
-              <div key={item.key} className="bg-slate-800 p-4 md:p-6 rounded-lg border border-slate-600 shadow-lg flex flex-col justify-between transform transition-all hover:border-pink-500/50">
+        {/* LEFT COLUMN: UPGRADES (8 cols) */}
+        <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* Diamond Exchange Banner */}
+          <div className="w-full bg-slate-900/60 border border-cyan-500/30 p-4 rounded relative overflow-hidden group">
+            <div className="absolute inset-0 bg-cyan-500/5 opacity-0 group-hover:opacity-10 transition-opacity" />
+            <div className="flex justify-between items-center relative z-10">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-slate-800 rounded flex items-center justify-center text-2xl border border-cyan-500/50 shadow-[0_0_10px_rgba(6,182,212,0.3)] animate-pulse-slow">💎</div>
                 <div>
-                  <h3 className="text-xl md:text-2xl text-yellow-400 font-bold flex justify-between items-center">
-                    <span className="flex items-center">
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    EXCHANGE PROTOCOL <span className="text-xs bg-cyan-900/50 text-cyan-300 px-2 py-0.5 rounded font-mono">RATE: 1000:1</span>
+                  </h3>
+                  <p className="text-slate-400 text-sm">Convert loose Credits into permanent E-Diamonds.</p>
+                </div>
+              </div>
+              <button
+                onClick={onExchangeDiamond}
+                disabled={money < 1000}
+                className={`skew-x-[-12deg] px-6 py-2 font-bold transition-all active:scale-95 ${money >= 1000 ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+              >
+                <span className="skew-x-[12deg] inline-block">EXCHANGE // $1000</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Upgrades Grid */}
+          <div>
+            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <span className="w-2 h-6 bg-green-500 block skew-x-[-12deg]" />
+              DRONE MODULES
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {upgradesList.map((item) => {
+                const level = upgrades[item.key as keyof UpgradeStats];
+                const cost = getCost(level);
+                const canAfford = money >= cost;
+
+                return (
+                  <div key={item.key} className="bg-slate-900/60 border border-slate-700 hover:border-green-500/50 p-4 transition-all group relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-50 font-mono text-xs text-slate-500">MK.{level}</div>
+
+                    <h3 className="text-lg font-bold text-green-400 mb-1 flex items-center gap-2">
                       {item.name}
                       <InfoTooltip text={item.info} />
-                    </span>
-                    <span className="text-xs bg-slate-700 px-2 py-1 rounded text-gray-300">Lv {level}</span>
-                  </h3>
-                  <p className="text-gray-300 my-2 text-sm md:text-base">{item.desc}</p>
-                </div>
-                <button
-                  onClick={() => buyUpgrade(item.key as keyof UpgradeStats, cost)}
-                  disabled={!canAfford}
-                  className={`mt-4 py-3 px-4 rounded font-bold w-full transition-all active:scale-95 touch-manipulation ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white shadow-lg' : 'bg-gray-600 text-gray-400 cursor-not-allowed opacity-50'}`}
-                >
-                  升級 (${cost})
-                </button>
-              </div>
-            );
-          })}
-        </div>
+                    </h3>
+                    <div className="text-xs text-slate-400 font-mono mb-2 uppercase tracking-wider">{item.sub}</div>
+                    <p className="text-slate-300 text-sm mb-4 h-10">{item.desc}</p>
 
-        {/* Equipment */}
-        <h2 className="text-2xl text-orange-400 font-bold mb-4 self-start border-b border-orange-500 w-full pb-2">特殊裝備 (SPECIAL EQUIPMENT)</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full mb-8">
-          {equipmentList.map((item) => {
-            const owned = ownedItems.includes(item.id as EquipmentId);
-            const equipped = equippedItem === item.id;
-            const canAfford = money >= item.cost;
-
-            return (
-              <div key={item.id} className={`bg-slate-800 p-4 rounded-lg border ${equipped ? 'border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.3)]' : 'border-slate-600'} shadow-lg flex flex-col justify-between`}>
-                <div>
-                  <h3 className="text-lg text-yellow-400 font-bold flex items-center">
-                    {item.name}
-                    <InfoTooltip text={item.info} />
-                  </h3>
-                  <p className="text-gray-400 text-sm my-2">{item.desc}</p>
-                </div>
-                {owned ? (
-                  <button
-                    onClick={() => equipItem(item.id as EquipmentId)}
-                    disabled={equipped}
-                    className={`mt-2 py-2 px-4 rounded font-bold w-full ${equipped ? 'bg-orange-600 text-white cursor-default' : 'bg-slate-600 hover:bg-slate-500 text-white'}`}
-                  >
-                    {equipped ? '已裝備' : '裝備'}
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => buyItem(item.id as EquipmentId, item.cost)}
-                    disabled={!canAfford}
-                    className={`mt-2 py-2 px-4 rounded font-bold w-full ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-gray-600 text-gray-400 cursor-not-allowed'}`}
-                  >
-                    購買 (${item.cost})
-                  </button>
-                )}
-              </div>
-            );
-          })}
-          {/* Unequip Option */}
-          <div className={`bg-slate-800 p-4 rounded-lg border border-slate-600 shadow-lg flex flex-col justify-between items-center opacity-80`}>
-            <h3 className="text-lg text-gray-400 font-bold">無裝備</h3>
-            <button onClick={() => equipItem('NONE')} disabled={equippedItem === 'NONE'} className={`mt-auto py-2 px-4 rounded font-bold w-full ${equippedItem === 'NONE' ? 'bg-gray-700 cursor-default' : 'bg-slate-600 hover:bg-slate-500'}`}>
-              {equippedItem === 'NONE' ? '啟用' : '卸除'}
-            </button>
+                    <div className="flex justify-between items-end mt-auto">
+                      <div className="text-xs text-slate-500">NEXT: ${cost}</div>
+                      <button
+                        onClick={() => buyUpgrade(item.key as keyof UpgradeStats, cost)}
+                        disabled={!canAfford}
+                        className={`skew-x-[-12deg] px-6 py-1.5 font-bold text-sm transition-all active:scale-95 ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+                      >
+                        <span className="skew-x-[12deg] inline-block">UPGRADE</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
 
+        {/* RIGHT COLUMN: EQUIPMENT & ACTIONS (4 cols) */}
+        <div className="lg:col-span-4 flex flex-col gap-8 h-full">
+
+          {/* Equipment */}
+          <div className="bg-slate-900/40 p-6 border-l-2 border-slate-700 h-full flex flex-col">
+            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+              <span className="w-2 h-6 bg-orange-500 block skew-x-[-12deg]" />
+              SPECIAL GEAR
+            </h2>
+
+            <div className="flex flex-col gap-4 flex-1">
+              {equipmentList.map((item) => {
+                const owned = ownedItems.includes(item.id as EquipmentId);
+                const equipped = equippedItem === item.id;
+                const canAfford = money >= item.cost;
+
+                return (
+                  <div key={item.id} className={`p-4 border transition-all ${equipped ? 'bg-slate-800 border-orange-500 shadow-[0_0_15px_rgba(249,115,22,0.2)]' : 'bg-slate-900/60 border-slate-700'}`}>
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className="font-bold text-orange-400 text-sm flex items-center gap-2">
+                          {item.name}
+                          <InfoTooltip text={item.info} />
+                        </div>
+                        <div className="text-[10px] text-slate-400 uppercase tracking-wider">{item.sub}</div>
+                      </div>
+                      {equipped && <div className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />}
+                    </div>
+
+                    <div className="text-xs text-slate-300 mb-3">{item.desc}</div>
+
+                    {owned ? (
+                      <button
+                        onClick={() => equipItem(item.id as EquipmentId)}
+                        disabled={equipped}
+                        className={`w-full py-1.5 text-xs font-bold uppercase tracking-wider transition-all ${equipped ? 'bg-orange-600/20 text-orange-400 cursor-default border border-orange-500/50' : 'bg-slate-700 hover:bg-slate-600 text-white'}`}
+                      >
+                        {equipped ? ':: ACTIVE ::' : 'EQUIP'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => buyItem(item.id as EquipmentId, item.cost)}
+                        disabled={!canAfford}
+                        className={`w-full py-1.5 text-xs font-bold uppercase tracking-wider transition-all ${canAfford ? 'bg-green-600 hover:bg-green-500 text-white' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}
+                      >
+                        BUY ${item.cost}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Empty Slot */}
+              <div className="mt-auto pt-4 border-t border-slate-700 content-end">
+                <button
+                  onClick={() => equipItem('NONE')}
+                  disabled={equippedItem === 'NONE'}
+                  className={`w-full py-2 text-xs font-bold uppercase tracking-wider transition-all ${equippedItem === 'NONE' ? 'bg-slate-800 text-slate-500 cursor-default' : 'bg-slate-700 hover:bg-red-500/20 hover:text-red-400 text-slate-400'}`}
+                >
+                  UNEQUIP ALL
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* Footer Actions */}
+      <div className="absolute bottom-0 left-0 w-full bg-slate-900/90 backdrop-blur border-t border-slate-700 p-4 flex justify-between items-center z-20 px-8">
+        <div className="text-xs text-slate-500 font-mono">
+          NEURO-CORP DRONE SERVICE // TERMINAL_ID_883
+        </div>
         <button
           onClick={() => {
             if (onSave) onSave();
             onNextLevel();
           }}
-          className="mt-4 bg-gray-500 hover:bg-gray-400 active:bg-gray-600 text-white text-xl md:text-2xl py-4 px-12 rounded-full font-bold shadow-lg w-full md:w-auto touch-manipulation mb-8"
+          className="group relative px-8 py-3 bg-white text-black font-black italic tracking-wider hover:bg-cyan-400 transition-colors skew-x-[-12deg]"
         >
-          返回存檔點 (BACK)
+          <div className="absolute inset-0 border-2 border-white group-hover:border-cyan-400 translate-x-1 translate-y-1 transition-transform group-hover:translate-x-1.5 group-hover:translate-y-1.5" />
+          <span className="skew-x-[12deg] inline-block flex items-center gap-2">
+            LEAVE DOCK <span className="text-lg">→</span>
+          </span>
         </button>
       </div>
     </div>

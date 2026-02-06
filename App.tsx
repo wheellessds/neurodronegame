@@ -1,10 +1,11 @@
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+﻿import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { GameCanvas } from './components/GameCanvas';
 import { Shop } from './components/Shop';
-import { UIOverlay } from './components/UIOverlay';
+import { HUDOverlay } from './components/HUDOverlay';
 import { MobileControls } from './components/MobileControls';
 import { LeaderboardEntry, ControlsConfig, GameState, Persona, UpgradeStats, Vector2, EquipmentId } from './types';
 import { INITIAL_MONEY } from './constants';
+import { CharacterSelectOverlay } from './components/CharacterSelectOverlay';
 import { SoundManager } from './utils/audio';
 import { NeuroFace } from './components/NeuroFace';
 import { Leaderboard } from './components/Leaderboard';
@@ -15,6 +16,7 @@ import { MultiplayerManager, RemotePlayer, MultiplayerEvent } from './utils/mult
 import { InfoTooltip } from './components/InfoTooltip';
 import { LoginModal } from './components/LoginModal';
 import { UserManagement } from './components/UserManagement';
+import { TutorialOverlay } from './components/TutorialOverlay';
 
 // Assets to preload
 import neuroIdle from './assets/face/neuro_idle.gif';
@@ -66,13 +68,29 @@ const App: React.FC = () => {
   const [showSaveModal, setShowSaveModal] = useState(false); // [UX] Manual trigger for save modal
   const [showSettings, setShowSettings] = useState(false);
   const [showUserMgmt, setShowUserMgmt] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [showCharacterSelect, setShowCharacterSelect] = useState(false);
 
-  // 这里的 LoginModal 不需要导入，因为 App 文件头部已经导入了（稍后添加 imports）
-  // 暂时用 any 绕过类型检查，下面会补上
-  // ...
+  // Upgrades & Inventory
+  const [upgrades, setUpgrades] = useState<UpgradeStats>({
+    engineLevel: 0,
+    tankLevel: 0,
+    hullLevel: 0,
+    cableLevel: 0,
+    cargoLevel: 0,
+    money: INITIAL_MONEY
+  });
+  const [ownedItems, setOwnedItems] = useState<EquipmentId[]>(['NONE']);
+  const [equippedItem, setEquippedItem] = useState<EquipmentId>('NONE');
 
   // [NEW] Save Game Function
-  const saveGame = useCallback(async (currentMoney: number, currentDiamonds?: number) => {
+  const saveGame = useCallback(async (
+    currentMoney: number,
+    currentDiamonds?: number,
+    currentUpgrades?: UpgradeStats,
+    currentOwnedItems?: EquipmentId[],
+    currentEquippedItem?: EquipmentId
+  ) => {
     if (!user) return;
     try {
       await fetch('/api/save', {
@@ -82,14 +100,17 @@ const App: React.FC = () => {
           token: user.token,
           saveData: {
             money: currentMoney,
-            diamonds: typeof currentDiamonds === 'number' ? currentDiamonds : diamonds
+            diamonds: typeof currentDiamonds === 'number' ? currentDiamonds : diamonds,
+            upgrades: currentUpgrades || upgrades,
+            ownedItems: currentOwnedItems || ownedItems,
+            equippedItem: currentEquippedItem || equippedItem
           }
         })
       });
     } catch (e) {
       console.error("Auto-save failed", e);
     }
-  }, [user, diamonds]);
+  }, [user, diamonds, upgrades, ownedItems, equippedItem]);
 
   // [NEW] 当 dinero 改变时，防抖保存 (这里简化为在关键节点保存，防止频繁请求)
   // 目前策略：Game Over / Shop Close 时保存。但为了通过测试，我们在 setMoney 处不直接保存，而是单独调用。
@@ -101,6 +122,7 @@ const App: React.FC = () => {
   const [remotePlayers, setRemotePlayers] = useState<Map<string, RemotePlayer>>(new Map());
   const [isMultiplayerHost, setIsMultiplayerHost] = useState(false);
   const mpManagerRef = useRef<MultiplayerManager | null>(null);
+  const [managerReady, setManagerReady] = useState(false);
 
   // New States for Room Admin & Browser
   const [showRoomBrowser, setShowRoomBrowser] = useState(false);
@@ -162,6 +184,9 @@ const App: React.FC = () => {
             setUser({ token: savedToken, username: u.username, saveData: u.saveData, role: u.role });
             setMoney(u.saveData.money);
             setDiamonds(u.saveData.diamonds || 0);
+            if (u.saveData.upgrades) setUpgrades(u.saveData.upgrades);
+            if (u.saveData.ownedItems) setOwnedItems(u.saveData.ownedItems);
+            if (u.saveData.equippedItem) setEquippedItem(u.saveData.equippedItem);
             setPlayerName(u.username);
             setIsAdmin(u.role === 'admin');
             setNameError(null);
@@ -251,20 +276,41 @@ const App: React.FC = () => {
   // Game Over Action
   const [postScoreAction, setPostScoreAction] = useState<'NONE' | 'SAVING' | 'SAVED' | null>('NONE');
 
-  // Upgrades & Inventory
-  const [upgrades, setUpgrades] = useState<UpgradeStats>({
-    engineLevel: 0,
-    tankLevel: 0,
-    hullLevel: 0,
-    cableLevel: 0,
-    cargoLevel: 0,
-    money: INITIAL_MONEY
-  });
-  const [ownedItems, setOwnedItems] = useState<EquipmentId[]>(['NONE']);
-  const [equippedItem, setEquippedItem] = useState<EquipmentId>('NONE');
 
-  // Mobile Mode
-  const [isMobileMode, setIsMobileMode] = useState(false);
+  // Mobile Mode - Automatic Detection & Persistence
+  const [isMobileMode, setIsMobileMode] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const saved = localStorage.getItem('neuro_drone_mobile_mode');
+    if (saved !== null) return saved === 'true';
+
+    // Initial Auto detection
+    const isTouch = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0));
+    const isUA = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isSmallScreen = window.innerWidth < 1024; // Check width too
+    return isTouch || isUA || isSmallScreen;
+  });
+
+  // [FIX] Listen for resize to auto-detect mobile mode (if not manually overridden)
+  useEffect(() => {
+    const handleResize = () => {
+      if (localStorage.getItem('neuro_drone_mobile_mode') === null) {
+        const isSmallScreen = window.innerWidth < 1024;
+        const isTouch = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0));
+        setIsMobileMode(isSmallScreen || isTouch);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleToggleMobileMode = useCallback(() => {
+    setIsMobileMode(prev => {
+      const next = !prev;
+      localStorage.setItem('neuro_drone_mobile_mode', String(next));
+      return next;
+    });
+  }, []);
 
   // Stats for UI Display
   const [displayStats, setDisplayStats] = useState({
@@ -272,7 +318,11 @@ const App: React.FC = () => {
     fuel: 100,
     cargoHp: 100,
     distance: 0,
-    distToNext: 0
+    distToNext: 0,
+    speed: 0,
+    equippedItem: 'NONE' as EquipmentId,
+    trainX: 0,
+    isBursting: false
   });
 
 
@@ -363,6 +413,31 @@ const App: React.FC = () => {
     const handleFSChange = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handleFSChange);
     return () => document.removeEventListener('fullscreenchange', handleFSChange);
+  }, []);
+
+  // Try to enter fullscreen on first user interaction (user gesture required).
+  const enterFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        const el = document.documentElement as any;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+        if (req) {
+          await req.call(el);
+          setIsFullscreen(!!document.fullscreenElement);
+        }
+      }
+    } catch (e) {
+      console.warn('Enter fullscreen failed', e);
+    }
+  };
+
+  useEffect(() => {
+    const onFirstInteract = async () => {
+      await enterFullscreen();
+    };
+    // Use once option so this only fires on the first gesture
+    window.addEventListener('pointerdown', onFirstInteract, { once: true });
+    return () => window.removeEventListener('pointerdown', onFirstInteract as any);
   }, []);
 
   useEffect(() => {
@@ -510,10 +585,20 @@ const App: React.FC = () => {
           return prev;
         });
       } else if (event.data.type === 'GAME_START') {
-        // Increment gameKey to force map regeneration
+        // [FIX] Full state reset on game start (same as handleStart for single player)
         setGameKey(k => k + 1);
+        setLastCheckpoint({ x: 200, y: 860 });
+        setUrgentOrderProgress(null);
+        setGameTime(0);
+        setCurrentTrajectory([]);
+        setCurrentCargoTrajectory([]);
+        setIsSpectating(false);
+        setShowSettings(false);
+        setShowSaveModal(false);
+        setAllPlayersDead(false);
+        setIsPermanentlyDead(false);
+        setRoomLeaderboard([]);
         setGameState(GameState.PLAYING);
-        setLastCheckpoint({ x: 200, y: 860 }); // Reset checkpoint for all players
         setVedalMessage("房主開始了遊戲！");
       } else if (event.data.type === 'GAME_RESTART') {
         // Go to Lobby instead of Playing
@@ -638,12 +723,14 @@ const App: React.FC = () => {
     if (multiplayerMode && !mpManagerRef.current) {
       mpManagerRef.current = new MultiplayerManager(handleMultiplayerEvent);
       mpManagerRef.current.init();
+      setManagerReady(true);
     }
 
     return () => {
       if (!multiplayerMode && mpManagerRef.current) {
         mpManagerRef.current.disconnect();
         mpManagerRef.current = null;
+        setManagerReady(false);
         setMultiplayerId(null);
         setJoinApproved(false);
         setWaitingApproval(false);
@@ -700,11 +787,25 @@ const App: React.FC = () => {
     setUser(null);
     setIsAdmin(false);
     setIsGuest(true);
-    // Keep local name for convenience but clear error since they are guest now (it will re-check)
+    // Keep local name for convenience but clear error since they are guest now
     setNameError(null);
     setVedalMessage("已登出系統。");
-    // Re-trigger name check as guest
-    handleUpdateName(playerName);
+    // Re-trigger name check as guest (bypass handleUpdateName since user state hasn't updated yet)
+    if (playerName && playerName.length > 0) {
+      fetch('/api/check-name', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: playerName })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.exists) {
+            setNameError("此暱稱已被註冊。訪客請更換名稱。");
+            setVedalMessage("偵測到身份冒用... 請更換暱稱。");
+          }
+        })
+        .catch(e => console.error("Logout name check failed", e));
+    }
   };
 
   const togglePause = useCallback(() => {
@@ -752,6 +853,7 @@ const App: React.FC = () => {
       mpManagerRef.current.myName = playerName;
     }
     SoundManager.init();
+    SoundManager.startWind();
     SoundManager.play('shop');
 
     // iOS Safari 的全屏 API 可能不可用或被阻止,不应阻塞游戏启动
@@ -783,6 +885,11 @@ const App: React.FC = () => {
       } else {
         setGhostData(null);
       }
+    } else if (multiplayerMode) {
+      // [FIX] In multiplayer, don't generate a random seed here.
+      // Host will generate and broadcast seed below, client already has seed from SYNC_SEED.
+      setIsChallengingSeed(false);
+      setGhostData(null);
     } else if (gameState !== GameState.MENU) {
       setCurrentSeed(Math.random().toString(36).substring(2, 9).toUpperCase());
       setIsChallengingSeed(false);
@@ -793,8 +900,6 @@ const App: React.FC = () => {
       setIsChallengingSeed(false);
       setGhostData(null);
     }
-
-    setGameKey(k => k + 1);
 
     // Multiplayer Flow: Enter Lobby first
     if (multiplayerMode) {
@@ -814,6 +919,7 @@ const App: React.FC = () => {
         // Client should already have seed from SYNC_SEED, but if not, wait for it
         // Don't generate a random seed here
       }
+      setGameKey(k => k + 1);
       setGameState(GameState.WAITING_LOBBY);
       setIsReady(true); // 选择角色即视为准备
       if (mpManagerRef.current && !isMultiplayerHost) {
@@ -821,6 +927,7 @@ const App: React.FC = () => {
       }
       return;
     } else {
+      setGameKey(k => k + 1);
       setGameState(GameState.PLAYING);
     }
 
@@ -829,15 +936,14 @@ const App: React.FC = () => {
     setCurrentTrajectory([]);
     setCurrentCargoTrajectory([]);
     setIsSpectating(false);
-    setCurrentCargoTrajectory([]);
-    setIsSpectating(false);
     setShowSettings(false); // Force close settings
     setShowSaveModal(false); // [FIX] Ensure save modal is closed on start
   };
 
-  const setStats = useCallback((hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number, trainX?: number) => {
-    setDisplayStats({ hp, fuel, cargoHp, distance, distToNext });
-
+  const setStats = useCallback((hp: number, fuel: number, cargoHp: number, distance: number, distToNext: number, speed: number, equippedItem: EquipmentId, trainX?: number, isBursting?: boolean) => {
+    setDisplayStats({
+      hp, fuel, cargoHp, distance, distToNext, speed, equippedItem, trainX: trainX ?? 0, isBursting: isBursting ?? false
+    });
     // Elimination Mode Check: If train passed current checkpoint while in Game Over
     if (gameState === GameState.GAME_OVER && multiplayerMode && trainX !== undefined && !isPermanentlyDead) {
       if (trainX >= lastCheckpoint.x) {
@@ -914,11 +1020,13 @@ const App: React.FC = () => {
       const time = gameTime;
       setPostScoreAction('MENU');
       setShowSaveModal(true); // Manually returning to menu triggers save modal immediately
+      const trajSnap = (window as any).gameRefs?.currentTrajectory || currentTrajectory;
+      const cargoTrajSnap = (window as any).gameRefs?.currentCargoTrajectory || currentCargoTrajectory;
       setPendingScore({
         distance: dist,
         time: time,
-        trajectory: (window as any).gameRefs?.currentTrajectory || currentTrajectory,
-        cargoTrajectory: (window as any).gameRefs?.currentCargoTrajectory || currentCargoTrajectory,
+        trajectory: trajSnap ? [...trajSnap] : [],
+        cargoTrajectory: cargoTrajSnap ? [...cargoTrajSnap] : [],
         name: playerName // [LOCK] Capture current name at moment of death
       });
     } else {
@@ -1014,8 +1122,8 @@ const App: React.FC = () => {
         setPendingScore({
           distance: finalDist,
           time: gameTime,
-          trajectory: trajectory || [],
-          cargoTrajectory: cargoTrajectory || [],
+          trajectory: trajectory ? [...trajectory] : [],
+          cargoTrajectory: cargoTrajectory ? [...cargoTrajectory] : [],
           name: playerName // [LOCK] Capture current name at moment of death
         });
       }
@@ -1062,8 +1170,11 @@ const App: React.FC = () => {
   const handleBuyUpgrade = (type: keyof UpgradeStats, cost: number) => {
     if (money >= cost) {
       SoundManager.play('coin');
-      setMoney(prev => prev - cost);
-      setUpgrades(prev => ({ ...prev, [type]: (prev[type] as number) + 1 }));
+      const nextMoney = money - cost;
+      const nextUpgrades = { ...upgrades, [type]: (upgrades[type] as number) + 1 };
+      setMoney(nextMoney);
+      setUpgrades(nextUpgrades);
+      if (user) saveGame(nextMoney, diamonds, nextUpgrades);
     }
   };
 
@@ -1078,15 +1189,19 @@ const App: React.FC = () => {
   const handleBuyItem = (item: EquipmentId, cost: number) => {
     if (money >= cost && !ownedItems.includes(item)) {
       SoundManager.play('coin');
-      setMoney(prev => prev - cost);
-      setOwnedItems(prev => [...prev, item]);
+      const nextMoney = money - cost;
+      const nextOwned = [...ownedItems, item];
+      setMoney(nextMoney);
+      setOwnedItems(nextOwned);
       setEquippedItem(item);
+      if (user) saveGame(nextMoney, diamonds, upgrades, nextOwned, item);
     }
   };
 
   const handleEquipItem = (item: EquipmentId) => {
     SoundManager.play('shop');
     setEquippedItem(item);
+    if (user) saveGame(money, diamonds, upgrades, ownedItems, item);
   };
 
   const handleNextSpectate = () => {
@@ -1122,25 +1237,34 @@ const App: React.FC = () => {
 
 
   const handleBuyRefuel = () => {
-    if (money >= 10) {
+    if (money >= 20) {
       SoundManager.play('coin');
-      setMoney(m => m - 10);
+      const nextMoney = money - 20;
+      setMoney(nextMoney);
+      if (user) saveGame(nextMoney);
       const refs = (window as any).gameRefs;
       if (refs?.drone) refs.drone.fuel = refs.drone.maxFuel;
+      return true;
     }
+    return false;
   };
 
   const handleBuyRepair = () => {
-    if (money >= 20) {
+    if (money >= 30) {
       SoundManager.play('coin');
-      setMoney(m => m - 20);
+      const nextMoney = money - 30;
+      setMoney(nextMoney);
+      if (user) saveGame(nextMoney);
       const refs = (window as any).gameRefs;
       if (refs?.drone) refs.drone.health = refs.drone.maxHealth;
+      return true;
     }
+    return false;
   };
 
   const handleLaunchFromShop = () => {
     SoundManager.play('shop');
+    if (user) saveGame(money);
     setGameState(GameState.PLAYING);
     const refs = (window as any).gameRefs;
     if (refs?.drone) { refs.drone.vel.y = -3.0; refs.drone.pos.y -= 5.0; }
@@ -1159,339 +1283,418 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen overflow-hidden bg-black select-none touch-none">
+      {/* Fullscreen prompt (shows when not fullscreen) */}
+      {!isFullscreen && (
+        <div className="fixed top-7 left-4 z-[9999]">
+          <button
+            onClick={(e) => { e.stopPropagation(); enterFullscreen(); }}
+            className="bg-white/10 hover:bg-white/20 backdrop-blur text-cyan-300 border border-cyan-500/30 px-6 py-2 rounded-none skew-x-[-12deg] font-black italic tracking-wider transition-all hover:scale-105 active:scale-95 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+            title="進入全螢幕"
+          >
+            <span className="skew-x-[12deg] inline-block">進入全螢幕</span>
+          </button>
+        </div>
+      )}
 
       {gameState === GameState.LOADING && (
         <LoadingScreen progress={loadingProgress} message={loadingMessage} />
       )}
 
       {gameState === GameState.MENU && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-white z-50 p-4 overflow-y-auto pointer-events-auto">
-          <h1
-            onClick={() => setShowSettings(true)}
-            className="text-6xl font-bold text-pink-400 mb-2 font-vt323 tracking-widest text-center cursor-pointer hover:scale-105 hover:brightness-125 transition-all active:scale-95 group relative"
-          >
-            Neuro's Drone Delivery<br />
-            <span className="text-3xl text-yellow-400">ENDLESS NIGHTMARE</span>
-            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-pink-500/50 opacity-0 group-hover:opacity-100 transition-opacity tracking-normal font-sans">點擊進入設定</div>
-          </h1>
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 text-white overflow-hidden font-sans select-none">
+          {/* Global Background Tech Pattern */}
+          <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(#ffffff 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+          <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.05)_50%)] bg-[length:100%_4px] opacity-20 z-0" />
 
-          {vedalMessage && (
-            <div className="bg-pink-900/30 border border-pink-500/50 px-4 py-2 rounded mb-4 text-[10px] text-pink-300 font-bold animate-pulse max-w-md text-center">
-              💬 {vedalMessage}
-            </div>
-          )}
-
-          <div className="bg-slate-800 p-6 rounded-lg border border-slate-600 mb-6 max-w-md w-full">
-            <div className="text-center mb-6 border-b border-slate-600 pb-4 cursor-pointer hover:bg-slate-700/30 rounded-lg p-2 transition-all active:scale-95 group relative" onClick={() => setShowLeaderboard(true)}>
-              <span className="text-cyan-500 font-bold text-lg tracking-widest group-hover:text-cyan-400">🏆 最遠飛行紀錄 🏆</span>
-              <div className="text-5xl text-white font-mono mt-2">{highScore}m</div>
-              {leaderboard.length > 0 && (
-                <div className="text-[10px] text-cyan-400/60 mt-2 font-mono italic">
-                  當前榜一: {leaderboard[0].name} ({leaderboard[0].distance}m)
+          {/* User Profile / Login Status - Top Right */}
+          <div className="absolute top-6 right-6 z-20 flex flex-col items-end gap-2">
+            {!user ? (
+              <button
+                onClick={() => setShowLogin(true)}
+                className="bg-white/10 hover:bg-white/20 backdrop-blur text-cyan-300 border border-cyan-500/30 px-6 py-2 rounded-none skew-x-[-12deg] font-black italic tracking-wider transition-all hover:scale-105 active:scale-95 shadow-[0_0_15px_rgba(6,182,212,0.3)]"
+                data-tutorial-target="login-btn"
+              >
+                <span className="skew-x-[12deg] inline-block">LOGIN // 登入</span>
+              </button>
+            ) : (<>
+              <div className="flex flex-col items-end">
+                <div className="flex items-center gap-3 bg-slate-900/80 backdrop-blur border-r-4 border-cyan-500 px-6 py-2 skew-x-[-12deg] shadow-lg">
+                  <div className="skew-x-[12deg] flex flex-col items-end">
+                    <span className="text-xs text-cyan-500 font-mono tracking-widest">OPERATOR</span>
+                    <span className="text-xl font-black italic text-white tracking-widest uppercase">{user.username}</span>
+                  </div>
                 </div>
-              )}
-              {isMultiplayerHost && mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
-                <div
-                  onClick={(e) => { e.stopPropagation(); setShowSettings(true); }}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full animate-bounce shadow-lg border border-white cursor-pointer z-[60]"
-                >
-                  {mpManagerRef.current.pendingRequests.length} REQUESTS
-                </div>
-              )}
-            </div>
-
-            {/* Nickname Input moved here */}
-            <div className="flex flex-col gap-1 mb-4">
-              <div className="flex gap-2 items-center bg-slate-900/50 p-3 rounded-lg border border-slate-700">
-                <span className="text-cyan-400 font-bold font-vt323 text-xl tracking-widest uppercase flex items-center">
-                  外送員代號：
-                  <InfoTooltip text={!!user ? "外送員已報到，無法更改暱稱。" : "輸入您的外送員代號，這將顯示在排行榜與房間名單中。"} />
-                </span>
-                <input
-                  type="text"
-                  placeholder="輸入暱稱..."
-                  value={playerName}
-                  onChange={(e) => handleUpdateName(e.target.value.slice(0, 12))}
-                  disabled={!!user || !!pendingScore}
-                  className={`flex-1 bg-slate-800 text-sm p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono ${(!!user || !!pendingScore) ? 'opacity-50 cursor-not-allowed' : ''}`}
-                />
-                {(!!user || !!pendingScore) && (
-                  <span className="text-slate-500 text-xs animate-pulse" title="名稱已鎖定">🔒</span>
-                )}
-              </div>
-              {nameError && (
-                <div className="text-red-500 text-[10px] font-bold animate-pulse px-3">
-                  ⚠️ {nameError}
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex flex-col gap-4">
-              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold flex items-center">
-                  多人連線
-                  <InfoTooltip text="開啟後可與線上其他外送員競爭或觀戰；關閉則進入純單機作業。" />
-                </span>
-                <button
-                  onClick={() => setMultiplayerMode(!multiplayerMode)}
-                  className={`px-4 py-1 rounded font-bold transition-colors ${multiplayerMode ? 'bg-cyan-500 text-white' : 'bg-slate-500 text-gray-300'}`}
-                >
-                  {multiplayerMode ? '已開啟' : '已關閉'}
-                </button>
               </div>
 
-              {multiplayerMode && (
-                <div className="flex flex-col gap-2 p-2 bg-slate-900/50 rounded border border-cyan-900">
-                  <div className="flex justify-between items-center h-8">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-cyan-500 font-mono">我的 ID: {multiplayerId || '連線中...'}</span>
-                      {multiplayerId && (
-                        <button
-                          onClick={(e) => {
-                            const id = multiplayerId.replace('NEURO-', '');
-                            // Fallback copy logic
-                            try {
-                              navigator.clipboard.writeText(id).catch(() => {
-                                // Manual fallback
-                                const el = document.createElement('input');
-                                el.value = id;
-                                document.body.appendChild(el);
-                                el.select();
-                                document.execCommand('copy');
-                                document.body.removeChild(el);
-                              });
-                            } catch (err) {
-                              const el = document.createElement('input');
-                              el.value = id;
-                              document.body.appendChild(el);
-                              el.select();
-                              document.execCommand('copy');
-                              document.body.removeChild(el);
-                            }
-                            setVedalMessage("ID 已複製！");
-                          }}
-                          className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
-                        >
-                          複製
-                        </button>
-                      )}
+
+              {/* NEW Currency UI - Integrated under Profile */}
+              <div className="flex items-center gap-2 mt-1">
+                {/* Diamonds */}
+                {(diamonds > 0 || isAdmin) && (
+                  <div className="bg-slate-900/60 backdrop-blur border-b-2 border-cyan-500/50 px-3 py-1 skew-x-[-12deg] flex items-center gap-2" title="Diamonds">
+                    <div className="skew-x-[12deg] flex items-center gap-1">
+                      <span className="text-lg">💎</span>
+                      <span className="text-cyan-300 font-bold font-mono text-sm leading-none pt-0.5">{diamonds}</span>
                     </div>
-                    <button
-                      disabled={!multiplayerId}
-                      onClick={() => {
-                        if (mpManagerRef.current) {
-                          mpManagerRef.current.host();
-                          setIsMultiplayerHost(true);
-                          setJoinApproved(true);
-                          setVedalMessage("創建房間成功。分享你的 ID！");
-                          // Initialize local participant list
-                          setRoomParticipants([{ id: mpManagerRef.current.myId || 'HOST', name: playerName }]);
-                          setPlayerReadyStates(new Map([[mpManagerRef.current.myId || 'HOST', true]])); // 房主默认准备
-                          setIsReady(true);
-                        }
-                      }}
-                      className={`text-xs px-3 py-1.5 rounded font-bold transition-all active:scale-95 cursor-pointer flex items-center gap-1 ${isMultiplayerHost ? 'bg-green-600 text-white shadow-[0_0_10px_rgba(34,197,94,0.5)]' : 'bg-cyan-700 hover:bg-cyan-600 text-white'}`}
-                    >
-                      {isMultiplayerHost ? '● 房主模式' : '創建房間'}
-                    </button>
-                    <InfoTooltip text="創建一個新的配送房間，並獲得一個專屬 ID 分享給好友。" />
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="輸入房間 ID (例如 5X7B)..."
-                      value={roomToJoin}
-                      onChange={(e) => setRoomToJoin(e.target.value.toUpperCase())}
-                      className="flex-1 bg-slate-800 text-xs p-2 rounded border border-slate-600 outline-none focus:border-cyan-500 text-cyan-300 font-mono"
-                    />
-                    <button
-                      onClick={(e) => {
-                        if (roomToJoin) {
-                          mpManagerRef.current?.join(roomToJoin.startsWith('NEURO-') ? roomToJoin : `NEURO-${roomToJoin}`, playerName);
-                          setIsMultiplayerHost(false);
-                          setWaitingApproval(true);
-                          setJoinApproved(false);
-                        }
-                      }}
-                      className="bg-pink-600 px-4 py-1 text-xs rounded font-bold hover:bg-pink-500 active:scale-95 cursor-pointer text-white flex items-center gap-1"
-                    >
-                      加入
-                      <InfoTooltip text="輸入好友的房間 ID 並請求加入其配送任務。" position="right" />
-                    </button>
-                  </div>
-                  {/* BROWSE ROOMS BUTTON */}
-                  <button
-                    onClick={() => {
-                      setShowRoomBrowser(true);
-                      MultiplayerManager.getRooms().then(setRoomList);
-                    }}
-                    className="bg-purple-600 hover:bg-purple-500 text-white text-xs py-1 rounded font-bold mt-1 flex items-center justify-center gap-1"
-                  >
-                    瀏覽房間
-                    <InfoTooltip text="啟動區域掃描，尋找當前所有可加入的公開配送房間。" />
-                  </button>
-                </div>
-              )}
-
-
-              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold flex items-center">
-                  操控模式
-                  <InfoTooltip text="切換操作模式。簡單模式有無人機自動找正；普通模式為全物理手動控制。" />
-                </span>
-                <button onClick={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')} className={`px-4 py-1 rounded font-bold transition-colors ${difficulty === 'EASY' ? 'bg-green-500 text-white' : 'bg-slate-500 text-gray-300'}`}>
-                  {difficulty === 'EASY' ? '簡單 (滑鼠/搖桿)' : '普通 (WASD)'}
-                </button>
-              </div>
-
-              <div className="flex items-center justify-between p-2 bg-slate-700/50 rounded">
-                <span className="text-white font-bold flex items-center">
-                  手機操控介面
-                  <InfoTooltip text="為觸控螢幕優化介面，開啟後會顯示虛擬搖桿與按鍵。" />
-                </span>
-                <button onClick={() => setIsMobileMode(!isMobileMode)} className={`w-16 h-8 rounded-full transition-colors relative border-2 border-slate-700 ${isMobileMode ? 'bg-pink-500' : 'bg-slate-700'}`}>
-                  <div className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${isMobileMode ? 'translate-x-8' : ''}`} />
-                </button>
-              </div>
-
-              {/* ADMIN: USER MANAGEMENT BUTTON */}
-              {isAdmin && (
-                <button
-                  onClick={() => setShowUserMgmt(true)}
-                  className="w-full bg-purple-900/50 hover:bg-purple-800 text-purple-200 font-bold py-2 rounded border border-purple-500/50 transition-all active:scale-95 flex items-center justify-center gap-2 mt-2 group shadow-[0_0_10px_rgba(168,85,247,0.2)]"
-                >
-                  <span className="group-hover:animate-spin">🛡️</span>
-                  DATABASE: USER MANAGEMENT
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
-            {multiplayerMode && !isMultiplayerHost && waitingApproval ? (
-              <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-yellow-500 animate-pulse text-yellow-400 font-bold tracking-widest">
-                正在等待房主批准...
-              </div>
-            ) : multiplayerMode && !isMultiplayerHost && !joinApproved ? (
-              <div className="w-full text-center p-4 bg-slate-800/80 rounded border border-cyan-500 text-cyan-400 font-bold tracking-widest">
-                請先加入房間
-              </div>
-            ) : (
-              <>
-                {joinApproved && !isMultiplayerHost && (
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-green-400 font-bold animate-bounce whitespace-nowrap">
-                    ✓ 已批准！請選擇無人機
                   </div>
                 )}
-                <div className="flex items-center gap-2 flex-1">
-                  <button
-                    onClick={() => { setPersona(Persona.NEURO); handleStart(); }}
-                    onTouchStart={(e) => {
-                      e.currentTarget.style.transform = 'scale(0.95)';
-                    }}
-                    onTouchEnd={(e) => {
-                      e.currentTarget.style.transform = 'scale(1)';
-                      // iOS Safari 有时不会触发 onClick,所以在 touch 事件中也执行
-                      if (!(multiplayerMode && !isMultiplayerHost && !joinApproved)) {
-                        e.preventDefault(); // 防止后续的 click 事件
-                        setPersona(Persona.NEURO);
-                        handleStart();
-                      }
-                    }}
-                    className={`flex-1 bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 touch-manipulation ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}`}
-                    disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
-                    style={{ WebkitTapHighlightColor: 'rgba(236, 72, 153, 0.3)', touchAction: 'manipulation' }}
-                  >
-                    使用 NEURO 出擊
-                  </button>
-                  <InfoTooltip text="以標準模式開始任務。此角色具有隨機的系統延遲模擬。" position="right" />
+                {/* Money */}
+                <div className="bg-slate-900/60 backdrop-blur border-b-2 border-yellow-500/50 px-4 py-1 skew-x-[-12deg] flex items-center gap-2" title="Credits" data-tutorial-target="currency-display">
+                  <div className="skew-x-[12deg] flex items-center gap-1">
+                    <span className="text-yellow-400 font-black italic text-sm tracking-wider">CREDITS</span>
+                    <span className="text-white font-mono font-bold text-sm leading-none pt-0.5">${money.toLocaleString()}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 flex-1">
-                  <button
-                    onClick={() => { setPersona(Persona.EVIL); handleStart(); }}
-                    onTouchStart={(e) => {
-                      e.currentTarget.style.transform = 'scale(0.95)';
-                    }}
-                    onTouchEnd={(e) => {
-                      e.currentTarget.style.transform = 'scale(1)';
-                      // iOS Safari 有时不会触发 onClick,所以在 touch 事件中也执行
-                      if (!(multiplayerMode && !isMultiplayerHost && !joinApproved)) {
-                        e.preventDefault(); // 防止后续的 click 事件
-                        setPersona(Persona.EVIL);
-                        handleStart();
-                      }
-                    }}
-                    className={`flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-4 px-8 rounded shadow-lg transition-all active:scale-95 touch-manipulation ${multiplayerMode && !isMultiplayerHost && !joinApproved ? 'opacity-50 cursor-not-allowed grayscale' : 'cursor-pointer'}`}
-                    disabled={multiplayerMode && !isMultiplayerHost && !joinApproved}
-                    style={{ WebkitTapHighlightColor: 'rgba(220, 38, 38, 0.3)', touchAction: 'manipulation' }}
-                  >
-                    使用 EVIL 出擊
-                  </button>
-                  <InfoTooltip text="以高速模式開始任務。具有更強的推力但燃料消耗也更快。" position="right" />
-                </div>
-              </>
-            )}
+              </div>
+
+
+            </>)}
           </div>
-        </div>
+
+          {/* MAIN MENU CONTENT */}
+          <div className="relative z-10 flex flex-col items-center w-full max-w-4xl px-4">
+            {/* Title Section */}
+            <div className="mb-10 text-center group cursor-pointer" onClick={() => setShowSettings(true)} data-tutorial-target="settings-title">
+              <h1 className="text-6xl md:text-8xl font-black italic tracking-tighter text-white drop-shadow-[0_0_20px_rgba(6,182,212,0.6)] animate-pulse-slow">
+                NEURO'S <span className="text-cyan-400">DRONE</span>
+              </h1>
+              <div className="flex items-center justify-center gap-4 mt-2">
+                <div className="h-0.5 w-12 bg-cyan-500/50" />
+                <h2 className="text-xl md:text-2xl font-bold tracking-[0.5em] text-cyan-200/80">DELIVERY SERVICE</h2>
+                <div className="h-0.5 w-12 bg-cyan-500/50" />
+              </div>
+              <div className="mt-2 text-xs font-mono text-slate-500 tracking-widest opacity-0 group-hover:opacity-100 transition-opacity">
+                CLICK TO CONFIGURE SYSTEM // 點擊設定
+              </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-8 w-full justify-center items-stretch">
+
+              {/* LEFT COLUMN: Operations */}
+              <div className="flex-1 flex flex-col gap-4">
+                {/* Callsign / Name Input */}
+                <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-4 skew-x-[-6deg] hover:border-cyan-500/50 transition-colors">
+                  <div className="skew-x-[6deg]">
+                    <div className="text-[10px] text-cyan-500 font-mono tracking-[0.3em] mb-2">CALLSIGN // 代號</div>
+                    {user ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl font-black italic text-white tracking-widest flex-1">{user.username}</span>
+                        <span className="text-[10px] text-green-500 font-mono tracking-widest">🔒 REGISTERED</span>
+                      </div>
+                    ) : (
+                      <div className="relative group/name">
+                        <input
+                          type="text"
+                          value={playerName}
+                          onChange={(e) => {
+                            const val = e.target.value.slice(0, 12);
+                            handleUpdateName(val);
+                          }}
+                          placeholder="ENTER CALLSIGN..."
+                          maxLength={12}
+                          className="w-full bg-transparent border-b-2 border-slate-700 focus:border-cyan-400 text-xl font-black italic text-white tracking-widest outline-none py-1 transition-colors placeholder:text-slate-700 placeholder:font-normal placeholder:not-italic"
+                        />
+                        {nameError && (
+                          <div className="text-red-400 text-[10px] font-mono mt-1 tracking-wider">{nameError}</div>
+                        )}
+                        <div className="text-[10px] text-slate-600 font-mono mt-1 tracking-wider">GUEST MODE — <span className="text-cyan-600 cursor-pointer hover:text-cyan-400" onClick={() => setShowLogin(true)}>LOGIN FOR PERMANENT ID</span></div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Multiplayer Panel */}
+                <div className="bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-6 skew-x-[-6deg] hover:border-cyan-500/50 transition-colors group">
+                  <div className="skew-x-[6deg]">
+                    <h3 className="text-cyan-400 font-black italic text-xl mb-4 flex items-center gap-2">
+                      <span className="w-2 h-6 bg-cyan-500 block"></span>
+                      MULTIPLAYER // 多人連線
+                    </h3>
+
+                    <label className="flex items-center gap-3 cursor-pointer mb-4 hover:opacity-80 transition-opacity" onClick={() => setMultiplayerMode(!multiplayerMode)} data-tutorial-target="mp-toggle">
+                      <div className={`w-12 h-6 rounded-full p-1 transition-colors ${multiplayerMode ? 'bg-green-500' : 'bg-slate-700'}`}>
+                        <div className={`w-4 h-4 rounded-full bg-white shadow-md transition-transform ${multiplayerMode ? 'translate-x-6' : ''}`} />
+                      </div>
+                      <span className={`font-bold font-mono text-sm ${multiplayerMode ? 'text-green-400' : 'text-slate-400'}`}>
+                        {multiplayerMode ? 'ONLINE ACTIVE' : 'OFFLINE'}
+                      </span>
+                    </label>
+
+                    {multiplayerMode && (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex gap-2">
+                          <div className="flex-1 bg-slate-800 p-2 border border-slate-600">
+                            <span className="text-[10px] text-slate-400 block tracking-wider">YOUR ID</span>
+                            <div className="text-cyan-400 font-mono font-bold tracking-widest cursor-pointer hover:text-white truncate"
+                              onClick={() => { if (mpManagerRef.current?.myId) { navigator.clipboard.writeText(mpManagerRef.current.myId); setVedalMessage("ID COPIED"); } }}>
+                              {mpManagerRef.current?.myId || 'CONNECTING...'}
+                            </div>
+                            <button
+                              onClick={() => { if (mpManagerRef.current?.myId) { navigator.clipboard.writeText(mpManagerRef.current.myId); setVedalMessage("ID COPIED"); } }}
+                              className="text-[10px] text-slate-400 hover:text-white underline cursor-pointer"
+                            >
+                              複製
+                            </button>
+                          </div>
+                          <button
+                            disabled={!multiplayerId}
+                            onClick={() => {
+                              if (mpManagerRef.current) {
+                                mpManagerRef.current.host();
+                                setIsMultiplayerHost(true);
+                                setJoinApproved(true);
+                                setVedalMessage("創建房間成功。分享你的 ID！");
+                                setRoomParticipants([{ id: mpManagerRef.current.myId || 'HOST', name: playerName }]);
+                                setPlayerReadyStates(new Map([[mpManagerRef.current.myId || 'HOST', true]]));
+                                setIsReady(true);
+                              }
+                            }}
+                            className={`flex-1 py-3 bg-cyan-900/50 hover:bg-cyan-800/80 border border-cyan-500/30 text-cyan-200 font-bold text-xs tracking-wider transition-all active:scale-95 ${isMultiplayerHost ? 'bg-cyan-600 text-white shadow-[0_0_15px_rgba(6,182,212,0.4)]' : ''}`}
+                          >
+                            {isMultiplayerHost ? 'HOSTING...' : 'CREATE ROOM'}
+                          </button>
+                          <button
+                            onClick={() => {
+                              setShowRoomBrowser(true);
+                              MultiplayerManager.getRooms().then(setRoomList);
+                            }}
+                            className="flex-1 py-3 bg-purple-900/50 hover:bg-purple-800/80 border border-purple-500/30 text-purple-200 font-bold text-xs tracking-wider transition-all active:scale-95"
+                          >
+                            BROWSE ROOMS
+                          </button>
+                        </div>
+
+                        <div className="bg-slate-900/40 backdrop-blur border-t-2 border-cyan-500/30 p-4">
+                          <div className="flex justify-between items-center mb-2">
+                            <div className="text-xs text-cyan-500 font-mono">CONNECTION STATUS</div>
+                            {user && (
+                              <div className="text-xs text-green-400 font-bold flex items-center gap-1">
+                                <span>●</span> {user.username}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-col gap-2">
+                            <div className="flex gap-2 relative">
+                              <input
+                                type="text"
+                                placeholder="ROOM ID"
+                                value={roomToJoin}
+                                onChange={(e) => setRoomToJoin(e.target.value.toUpperCase())}
+                                className="flex-1 bg-black/40 border border-slate-600 text-white font-mono text-sm px-3 py-2 outline-none focus:border-cyan-500 transition-colors uppercase placeholder:text-slate-600"
+                              />
+                              <button
+                                onClick={() => {
+                                  if (roomToJoin) {
+                                    mpManagerRef.current?.join(roomToJoin.startsWith('NEURO-') ? roomToJoin : `NEURO-${roomToJoin}`, playerName);
+                                    setIsMultiplayerHost(false);
+                                    setWaitingApproval(true);
+                                    setJoinApproved(false);
+                                  }
+                                }}
+                                className="bg-pink-600 hover:bg-pink-500 text-white px-4 font-black italic tracking-tighter skew-x-[-12deg] transition-all hover:scale-105 active:scale-95 shadow-[0_0_10px_rgba(219,39,119,0.4)]"
+                              >
+                                <span className="skew-x-[12deg] inline-block">JOIN</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* System Controls (Global) */}
+                <div className="flex gap-4">
+                  <div className="flex-1 bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-4 skew-x-[-6deg] hover:border-green-500/50 transition-colors cursor-pointer group"
+                    onClick={() => setDifficulty(d => d === 'NORMAL' ? 'EASY' : 'NORMAL')}>
+                    <div className="skew-x-[6deg] flex flex-col">
+                      <span className="text-[10px] text-slate-500 font-bold tracking-widest mb-1">CONTROL SYSTEM</span>
+                      <div className={`text-lg font-black italic transition-colors ${difficulty === 'EASY' ? 'text-green-400' : 'text-slate-300'}`}>
+                        {difficulty === 'EASY' ? 'EASY / 簡單' : 'MANUAL / 普通'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex-1 bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-4 skew-x-[-6deg] hover:border-pink-500/50 transition-colors cursor-pointer group"
+                    onClick={() => setIsMobileMode(!isMobileMode)}>
+                    <div className="skew-x-[6deg] flex flex-col">
+                      <span className="text-[10px] text-slate-500 font-bold tracking-widest mb-1">INTERFACE</span>
+                      <div className={`text-lg font-black italic transition-colors ${isMobileMode ? 'text-pink-400' : 'text-slate-300'}`}>
+                        {isMobileMode ? 'TOUCH / 觸控' : 'DESKTOP / 鍵盤'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+
+              {/* RIGHT COLUMN: Action */}
+              <div className="flex-1 flex flex-col gap-4 justify-center" data-tutorial-target="start-btn-neuro">
+                {multiplayerMode && !isMultiplayerHost && waitingApproval ? (
+                  <div className="h-full min-h-[160px] bg-slate-900/80 backdrop-blur border-2 border-yellow-500/50 flex flex-col items-center justify-center skew-x-[-6deg] animate-pulse">
+                    <div className="skew-x-[6deg] text-center">
+                      <div className="text-yellow-400 font-bold text-xl tracking-widest mb-2">WAITING FOR AUTHS</div>
+                      <div className="text-xs text-yellow-600 font-mono">等待房主批准...</div>
+                    </div>
+                  </div>
+                ) : multiplayerMode && !isMultiplayerHost && !joinApproved ? (
+                  <div className="h-full min-h-[160px] bg-slate-900/80 backdrop-blur border-2 border-slate-700 flex flex-col items-center justify-center skew-x-[-6deg] opacity-50">
+                    <div className="skew-x-[6deg] text-center">
+                      <div className="text-slate-400 font-bold text-xl tracking-widest mb-2">LINK REQUIRED</div>
+                      <div className="text-xs text-slate-600 font-mono">請先加入房間</div>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowCharacterSelect(true)}
+                    className="group relative h-full min-h-[160px] bg-white text-slate-950 font-black italic skew-x-[-6deg] transition-all hover:bg-cyan-400 hover:scale-[1.02] active:scale-[0.98] shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex items-center justify-center overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-[url('/assets/conceptart/neuro.png')] opacity-10 bg-cover bg-center mix-blend-multiply group-hover:scale-110 transition-transform duration-700" />
+                    <div className="skew-x-[6deg] relative z-20 flex flex-col items-center gap-1">
+                      <span className="text-5xl md:text-7xl tracking-tighter">SORTIE</span>
+                      <span className="text-lg font-bold tracking-[0.5em] opacity-60 group-hover:opacity-100 transition-opacity">出擊確認</span>
+                    </div>
+                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent translate-x-[-150%] group-hover:translate-x-[150%] transition-transform duration-500 ease-out" />
+                  </button>
+                )}
+
+                {isAdmin && (
+                  <button
+                    onClick={() => setShowUserMgmt(true)}
+                    className="bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 font-bold py-3 skew-x-[-6deg] border border-purple-500/30 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    <div className="skew-x-[6deg] flex items-center gap-2 text-xs tracking-widest">
+                      <span>🛡️</span> SYSTEM ADMIN // 管理後台
+                    </div>
+                  </button>
+                )}
+
+                {/* High Score Panel */}
+                <div className="mt-auto bg-slate-900/40 backdrop-blur border-t-2 border-cyan-500/30 p-4">
+                  <div className="text-xs text-cyan-500 font-mono mb-1">RECORD DISTANCE</div>
+                  <div className="text-3xl font-black italic text-white flex items-baseline gap-2">
+                    {highScore} <span className="text-sm font-normal text-slate-400">m</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono mt-1 cursor-pointer hover:text-cyan-400" onClick={() => setShowLeaderboard(true)} data-tutorial-target="leaderboard-card">VIEW LEADERBOARD // 查看榜單 →</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Status */}
+            <div className="mt-12 flex w-full justify-between items-end opacity-30 font-mono text-[10px] tracking-widest uppercase text-white select-none">
+              <div>SYS.VER: 2.0.0-ALPHA</div>
+              <div>SECURE CONNECTION // ESTABLISHED</div>
+            </div>
+          </div>
+        </div >
       )
       }
+      {/* Tutorial/Controls Hint (Menu Only - Hover/Long Press) */}
+      {
+        gameState === GameState.MENU && !showTutorial && !showSettings && (
+          <div className="absolute bottom-6 right-6 z-[60] group cursor-help" data-tutorial-target="tutorial-btn">
+            {/* Trigger Icon */}
+            <div className="w-10 h-10 rounded-full bg-slate-800/80 border-2 border-slate-600 flex items-center justify-center text-slate-400 font-bold hover:bg-cyan-900/80 hover:border-cyan-500 hover:text-cyan-400 transition-all backdrop-blur-sm shadow-[0_0_15px_rgba(0,0,0,0.5)] hover:shadow-[0_0_20px_rgba(34,211,238,0.4)]">
+              ?
+            </div>
 
-      {showLeaderboard && (
-        <div className="absolute inset-0 z-[100] pointer-events-auto">
-          <Leaderboard
-            entries={leaderboard}
-            onClose={() => setShowLeaderboard(false)}
-            onChallengeSeed={(entry) => { handleStart(entry); setShowLeaderboard(false); }}
-            currentSeed={currentSeed}
-            isAdmin={isAdmin}
-            token={user?.token}
-            onEntryDeleted={() => {
-              fetch('/api/leaderboard')
-                .then(res => res.json())
-                .then(setLeaderboard);
-            }}
-          />
-        </div>
-      )}
+            {/* Popup Hints */}
+            <div className="absolute bottom-full right-0 mb-4 opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity pointer-events-none skew-x-[-6deg] origin-bottom-right">
+              <div className="bg-slate-900/90 border border-cyan-500/50 p-4 rounded text-white shadow-xl backdrop-blur-md min-w-[200px]">
+                <div className="skew-x-[6deg]">
+                  <div className="text-cyan-400 font-black italic text-sm mb-2 border-b border-cyan-500/30 pb-1">FLIGHT CONTROLS</div>
 
-      {/* USER MANAGEMENT MODAL */}
-      {showUserMgmt && isAdmin && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-          <div className="w-full h-full max-w-4xl max-h-[90vh]">
-            <UserManagement
-              token={user?.token || ''}
-              onClose={() => setShowUserMgmt(false)}
-              onUserDeleted={() => {
+                  {/* WASD Layout */}
+                  <div className="flex gap-2 justify-center mb-2 opacity-80">
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="w-6 h-6 border border-white/50 rounded flex items-center justify-center text-xs font-bold">W</div>
+                      <div className="flex gap-1">
+                        <div className="w-6 h-6 border border-white/50 rounded flex items-center justify-center text-xs font-bold">A</div>
+                        <div className="w-6 h-6 border border-slate-600 rounded flex items-center justify-center text-xs font-bold text-slate-500">S</div>
+                        <div className="w-6 h-6 border border-white/50 rounded flex items-center justify-center text-xs font-bold">D</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <ul className="text-[10px] font-mono space-y-1 text-slate-300">
+                    <li><span className="text-yellow-400">W</span> - THRUST (推進)</li>
+                    <li><span className="text-yellow-400">A/D</span> - ROTATE (旋轉)</li>
+                    <li><span className="text-yellow-400">SPACE</span> - FIRE (開火)</li>
+                  </ul>
+                  <div className="mt-2 text-[9px] text-slate-500 text-center">LONG PRESS FOR DETAILS</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      }
+
+      {
+        showLeaderboard && (
+          <div className="absolute inset-0 z-[100] pointer-events-auto">
+            <Leaderboard
+              entries={leaderboard}
+              onClose={() => setShowLeaderboard(false)}
+              onChallengeSeed={(entry) => { handleStart(entry); setShowLeaderboard(false); }}
+              currentSeed={currentSeed}
+              isAdmin={isAdmin}
+              token={user?.token}
+              onEntryDeleted={() => {
                 fetch('/api/leaderboard')
                   .then(res => res.json())
                   .then(setLeaderboard);
               }}
-              onRedeemCode={handleRedeemCode}
             />
           </div>
-        </div>
-      )}
+        )
+      }
+
+      {/* USER MANAGEMENT MODAL */}
+      {
+        showUserMgmt && isAdmin && (
+          <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <div className="w-full h-full max-w-4xl max-h-[90vh]">
+              <UserManagement
+                token={user?.token || ''}
+                onClose={() => setShowUserMgmt(false)}
+                onUserDeleted={() => {
+                  fetch('/api/leaderboard')
+                    .then(res => res.json())
+                    .then(setLeaderboard);
+                }}
+                onRedeemCode={handleRedeemCode}
+              />
+            </div>
+          </div>
+        )
+      }
 
       {/* LOGIN MODAL */}
-      {showLogin && !isGuest && !user && (
-        <LoginModal
-          onLogin={(u) => {
-            setUser(u);
-            setMoney(u.saveData.money);
-            setDiamonds(u.saveData.diamonds || 0);
-            setShowLogin(false);
-            setPlayerName(u.username); // 使用登录名作为玩家名
-            setIsAdmin(u.role === 'admin');
-            setNameError(null);
-            localStorage.setItem('neuro_drone_token', u.token);
-            localStorage.setItem('neuro_drone_name', u.username);
-          }}
-          onGuest={() => {
-            setIsGuest(true);
-            setShowLogin(false);
-          }}
-        />
-      )}
+      {
+        showLogin && !user && (
+          <LoginModal
+            onLogin={(u) => {
+              setUser(u);
+              setMoney(u.saveData.money);
+              setDiamonds(u.saveData.diamonds || 0);
+              if (u.saveData.upgrades) setUpgrades(u.saveData.upgrades);
+              if (u.saveData.ownedItems) setOwnedItems(u.saveData.ownedItems);
+              if (u.saveData.equippedItem) setEquippedItem(u.saveData.equippedItem);
+              setShowLogin(false);
+              setPlayerName(u.username); // 使用登录名作为玩家名
+              setIsAdmin(u.role === 'admin');
+              setNameError(null);
+              localStorage.setItem('neuro_drone_token', u.token);
+              localStorage.setItem('neuro_drone_name', u.username);
+            }}
+            onGuest={() => {
+              setIsGuest(true);
+              setShowLogin(false);
+            }}
+          />
+        )
+      }
 
       {/* Room Browser Overlay */}
       {
@@ -1545,115 +1748,138 @@ const App: React.FC = () => {
       {/* Lobby Waiting Screen */}
       {
         gameState === GameState.WAITING_LOBBY && (
-          <div className="absolute inset-0 z-[300] flex flex-col items-center justify-center bg-slate-900/95 backdrop-blur-md text-white pointer-events-auto">
+          <div className="absolute inset-0 z-[300] flex flex-col items-center justify-center bg-slate-950 text-white pointer-events-auto overflow-hidden">
+            {/* Background Grid */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(6,182,212,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950 opacity-80 pointer-events-none" />
+
             <div
               onClick={() => setShowSettings(true)}
-              className="group relative flex flex-col items-center cursor-pointer mb-8 transition-all hover:scale-105 active:scale-95"
+              className="group relative flex flex-col items-center cursor-pointer mb-8 transition-all hover:scale-105 active:scale-95 z-10"
               title="Click to change Avatar / Settings (點擊更換頭像/設定)"
             >
-              <div className="transform scale-150 border-4 border-transparent group-hover:border-cyan-500/30 rounded-full transition-all duration-300">
+              <div className="transform scale-150 border-4 border-cyan-500/30 group-hover:border-cyan-400 rounded-full transition-all duration-300 shadow-[0_0_20px_rgba(6,182,212,0.3)]">
                 <NeuroFace status="idle" persona={persona} />
               </div>
-              <div className="absolute -bottom-10 opacity-0 group-hover:opacity-100 transition-opacity bg-cyan-900/90 text-cyan-400 text-[10px] px-2 py-1 rounded border border-cyan-500 font-bold tracking-widest whitespace-nowrap z-10 pointer-events-none">
-                點擊更換頭像 / 設定
+              <div className="absolute -bottom-12 opacity-0 group-hover:opacity-100 transition-all bg-slate-900/90 text-cyan-400 text-[10px] px-3 py-1 skew-x-[-12deg] border border-cyan-500 font-bold tracking-widest whitespace-nowrap z-10 pointer-events-none translate-y-2 group-hover:translate-y-0">
+                <span className="skew-x-[12deg] inline-block">CONFIG PROFILE // 設定</span>
               </div>
             </div>
 
             {isMultiplayerHost ? (
-              <div className="flex flex-col items-center gap-6 w-full max-w-md">
-                <h2 className="text-5xl font-bold text-green-400 animate-pulse font-vt323 tracking-widest mb-2">多人大廳</h2>
+              <div className="flex flex-col items-center gap-6 w-full max-w-2xl px-4 z-10">
+                <h2 className="text-6xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600 drop-shadow-[0_0_10px_rgba(34,197,94,0.5)] tracking-tighter mb-4">
+                  LOBBY <span className="text-2xl font-normal text-slate-500 not-italic tracking-widest ml-2">HOST</span>
+                </h2>
 
-                <div className="w-full bg-slate-800/80 p-5 rounded-xl border-2 border-slate-700 shadow-xl">
-                  <h3 className="text-cyan-400 font-bold border-b-2 border-slate-700 pb-3 mb-4 tracking-widest text-center uppercase">
-                    已就緒玩家 ({roomParticipants.length})
-                  </h3>
-                  <div className="grid grid-cols-2 gap-3 max-h-[30vh] overflow-y-auto pr-2 custom-scrollbar">
-                    {roomParticipants.length > 0 ? (
-                      roomParticipants.map((p) => (
-                        <div key={p.id} className="flex flex-col bg-slate-900/80 border border-slate-700 p-3 rounded-lg relative overflow-hidden group">
-                          <div className={`absolute top-0 left-0 w-1 h-full ${p.id === multiplayerId ? 'bg-cyan-500' : 'bg-green-500'} opacity-50`}></div>
-                          <span className="text-white font-bold text-sm truncate">{p.name}</span>
-                          <span className="text-[9px] text-slate-500 font-mono mt-1">ID: {p.id.slice(-6)}</span>
-                          {/* 准备状态显示 */}
-                          <div className="mt-2 text-[10px] font-bold">
-                            {playerReadyStates.get(p.id) ? (
-                              <span className="text-green-400">✓ 已準備</span>
-                            ) : (
-                              <span className="text-yellow-500">⏳ 未準備</span>
-                            )}
+                <div className="w-full bg-slate-900/60 backdrop-blur-md border border-slate-700/50 p-6 skew-x-[-6deg] hover:border-green-500/30 transition-colors shadow-2xl">
+                  <div className="skew-x-[6deg]">
+                    <h3 className="text-emerald-400 font-black italic text-xl border-b border-slate-700/50 pb-2 mb-4 flex justify-between items-end">
+                      <span>SQUADRON STATUS // 中隊狀態</span>
+                      <span className="text-sm font-mono text-slate-500">{roomParticipants.length} OPERATIVE(S)</span>
+                    </h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[35vh] overflow-y-auto pr-2 custom-scrollbar">
+                      {roomParticipants.length > 0 ? (
+                        roomParticipants.map((p) => (
+                          <div key={p.id} className="group relative flex items-center justify-between bg-slate-800/50 border border-slate-700 hover:border-emerald-500/50 p-3 transition-colors">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-1 h-8 ${playerReadyStates.get(p.id) ? 'bg-emerald-500 shadow-[0_0_8px_#10b981]' : 'bg-yellow-600'}`} />
+                              <div className="flex flex-col">
+                                <span className={`font-bold font-mono tracking-wider ${p.id === multiplayerId ? 'text-cyan-300' : 'text-slate-200'}`}>
+                                  {p.name}
+                                  {p.id === multiplayerId && <span className="ml-2 text-[8px] bg-cyan-900 text-cyan-400 px-1 rounded">ME</span>}
+                                </span>
+                                <span className="text-[9px] text-slate-600 font-mono">ID: {p.id.slice(-4)}</span>
+                              </div>
+                            </div>
+                            <div className="font-mono text-xs font-bold">
+                              {playerReadyStates.get(p.id) ? (
+                                <span className="text-emerald-400 animate-pulse">READY</span>
+                              ) : (
+                                <span className="text-yellow-600">WAITING</span>
+                              )}
+                            </div>
                           </div>
-                          {p.id === multiplayerId && <span className="absolute top-1 right-1 text-[8px] bg-cyan-900/80 text-cyan-400 px-1 rounded border border-cyan-800 font-bold">我</span>}
+                        ))
+                      ) : (
+                        <div className="col-span-2 text-center text-slate-600 font-mono py-8 animate-pulse">
+                          WAITING FOR CONNECTION SYNC...
                         </div>
-                      ))
-                    ) : (
-                      <div className="col-span-2 text-center text-slate-500 py-4 italic">等待連線同步...</div>
-                    )}
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => {
-                    console.log("[LOBBY] Start button clicked");
-                    if (mpManagerRef.current) {
-                      console.log("[LOBBY] Broadcasting start");
-                      // Send to clients
-                      mpManagerRef.current.broadcast({ type: 'GAME_START' });
-                      // Trigger locally
-                      handleMultiplayerEvent({ type: 'DATA', id: 'SYSTEM', data: { type: 'GAME_START' } });
-                    } else {
-                      console.error("[LOBBY] mpManagerRef is null");
-                    }
-                  }}
-                  disabled={(() => {
-                    // 检查是否所有玩家都准备
-                    const allReady = roomParticipants.every(p => playerReadyStates.get(p.id) === true);
-                    return !allReady;
-                  })()}
-                  className={`w-full font-bold py-4 rounded-xl text-2xl tracking-widest cursor-pointer relative z-[310] transition-all ${roomParticipants.every(p => playerReadyStates.get(p.id) === true)
-                    ? 'bg-green-600 hover:bg-green-500 shadow-[0_0_20px_rgba(34,197,94,0.6)] animate-pulse text-white'
-                    : 'bg-gray-600 cursor-not-allowed text-gray-400'
-                    }`}
-                >
-                  {roomParticipants.every(p => playerReadyStates.get(p.id) === true)
-                    ? '開始遊戲'
-                    : `等待玩家準備 (${roomParticipants.filter(p => playerReadyStates.get(p.id)).length}/${roomParticipants.length})`
-                  }
-                </button>
-
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
-                >
-                  ⚙️ 系統設定
-                </button>
-
-                {mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
-                  <button
-                    onClick={() => setShowSettings(true)}
-                    className="w-full bg-yellow-600/80 hover:bg-yellow-500 text-black font-bold py-2 rounded border-2 border-yellow-400 animate-pulse flex items-center justify-center gap-2"
-                  >
-                    ⚠️ {mpManagerRef.current.pendingRequests.length} 待處理請求
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-6 w-full max-w-sm">
-                <div className="flex flex-col items-center gap-4">
-                  <h2 className="text-5xl font-bold text-cyan-400 animate-pulse font-vt323 tracking-widest mb-4">等待房主開始...</h2>
-                  <div className="bg-slate-800 p-6 rounded-lg border-2 border-slate-600 text-center w-full">
-                    <p className="text-slate-400 text-sm uppercase tracking-widest mb-2">當前區域 (種子)</p>
-                    <p className="text-2xl font-mono font-bold text-white mb-4">{currentSeed}</p>
-                    <div className="flex gap-2 justify-center">
-                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                      <div className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                      )}
                     </div>
                   </div>
                 </div>
 
+                <div className="flex gap-4 w-full">
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-4 skew-x-[-12deg] border border-slate-600 hover:border-slate-400 transition-all active:scale-95"
+                  >
+                    <div className="skew-x-[12deg] flex items-center justify-center gap-2">
+                      <span>⚙️</span> SETTINGS
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      if (mpManagerRef.current) {
+                        // [FIX] Re-broadcast seed right before GAME_START to ensure all clients have it
+                        mpManagerRef.current.broadcast({ type: 'SYNC_SEED', seed: currentSeed });
+                        mpManagerRef.current.broadcast({ type: 'GAME_START' });
+                        handleMultiplayerEvent({ type: 'DATA', id: 'SYSTEM', data: { type: 'GAME_START' } });
+                      }
+                    }}
+                    disabled={!roomParticipants.every(p => playerReadyStates.get(p.id))}
+                    className={`flex-[2] py-4 font-black italic text-xl skew-x-[-12deg] transition-all active:scale-95 relative overflow-hidden group ${roomParticipants.every(p => playerReadyStates.get(p.id))
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-[0_0_25px_rgba(16,185,129,0.4)]'
+                      : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700'
+                      }`}
+                  >
+                    <div className="skew-x-[12deg] relative z-10 flex flex-col items-center leading-none">
+                      <span>{roomParticipants.every(p => playerReadyStates.get(p.id)) ? 'INITIATE LAUNCH' : 'AWAITING READINESS'}</span>
+                      <span className="text-[10px] font-normal font-mono opacity-80 tracking-widest mt-1">
+                        {roomParticipants.every(p => playerReadyStates.get(p.id)) ? '所有系統已就緒 // 可開始' : `${roomParticipants.filter(p => playerReadyStates.get(p.id)).length} / ${roomParticipants.length} OPERATORS READY`}
+                      </span>
+                    </div>
+                    {roomParticipants.every(p => playerReadyStates.get(p.id)) && (
+                      <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-500 ease-in-out skew-x-[12deg]" />
+                    )}
+                  </button>
+                </div>
+
+                {mpManagerRef.current && mpManagerRef.current.pendingRequests.length > 0 && (
+                  <div
+                    onClick={() => setShowSettings(true)}
+                    className="w-full bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 font-bold py-2 border border-yellow-500/50 flex items-center justify-center gap-2 cursor-pointer animate-bounce-slow"
+                  >
+                    <span>⚠️</span> {mpManagerRef.current.pendingRequests.length} PENDING AUTHORIZATION REQUEST(S) // 待處理請求
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center w-full max-w-lg z-10">
+                <div className="bg-slate-900/80 backdrop-blur border-2 border-slate-700 p-8 skew-x-[-6deg] text-center shadow-2xl relative overflow-hidden w-full mb-4">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500/50 animate-pulse"></div>
+                  <div className="skew-x-[6deg]">
+                    <h2 className="text-3xl font-black italic text-cyan-400 mb-2">STANDBY MODE</h2>
+                    <p className="text-slate-400 font-mono text-sm tracking-wider mb-6">AWAITING HOST COMMAND // 等待房主開始</p>
+                    <div className="flex justify-center gap-2">
+                      <span className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce delay-0"></span>
+                      <span className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce delay-100"></span>
+                      <span className="w-3 h-3 bg-cyan-500 rounded-full animate-bounce delay-200"></span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-900/60 backdrop-blur border border-slate-700 rounded-lg p-4 w-full text-center">
+                  <p className="text-slate-400 text-sm uppercase tracking-widest mb-2">CURRENT ZONE SEED</p>
+                  <p className="text-2xl font-mono font-bold text-white tracking-widest">{currentSeed}</p>
+                </div>
+
                 <button
                   onClick={() => setShowSettings(true)}
-                  className="w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
+                  className="mt-4 w-full bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 rounded-lg border-2 border-slate-600 shadow-lg tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2"
                 >
                   ⚙️ 系統設定
                 </button>
@@ -1666,32 +1892,58 @@ const App: React.FC = () => {
 
       {
         pendingScore && showSaveModal && (
-          <div className="absolute inset-0 z-[110] flex items-center justify-center bg-black/50 backdrop-blur-md pointer-events-auto p-4">
-            <div className={`bg-slate-800 border-4 border-cyan-500 p-8 rounded-xl shadow-2xl max-w-sm w-full animate-bounce-short`}>
-              <h2 className={`text-3xl font-bold mb-1 text-center font-vt323 tracking-widest text-cyan-400`}>⭐ 新紀錄 ⭐</h2>
-              <div className="relative mb-4">
-                <input
-                  autoFocus={!pendingScore.name}
-                  type="text"
-                  value={playerName}
-                  onChange={(e) => !pendingScore.name && setPlayerName(e.target.value.slice(0, 12))}
-                  placeholder="輸入名字..."
-                  disabled={!!pendingScore.name}
-                  className={`w-full bg-slate-900 border-2 border-slate-600 rounded p-3 text-white font-bold outline-none focus:border-cyan-500 ${!!pendingScore.name ? 'opacity-60 cursor-not-allowed' : ''}`}
-                />
-                {!!pendingScore.name && <span className="absolute right-3 top-3 text-slate-500">🔒</span>}
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => saveToLeaderboard(pendingScore.name || playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)} className="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded">保存</button>
-                <button onClick={() => {
-                  setPendingScore(null);
-                  setShowSaveModal(false);
-                  if (postScoreAction === 'RESTART') handleStart();
-                  else if (postScoreAction === 'MENU') {
-                    setShowSettings(false);
-                    setGameState(GameState.MENU);
-                  }
-                }} className="bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 px-4 rounded">跳過</button>
+          <div className="absolute inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-md pointer-events-auto p-4 animate-fade-in">
+            <div className="bg-slate-900 border border-cyan-500/50 p-1 w-full max-w-md skew-x-[-6deg] shadow-[0_0_50px_rgba(6,182,212,0.3)] relative group">
+              <div className="absolute inset-0 border-2 border-cyan-400 opacity-50 blur-[2px]" />
+              <div className="absolute -top-4 -left-4 w-8 h-8 border-t-4 border-l-4 border-cyan-400" />
+              <div className="absolute -bottom-4 -right-4 w-8 h-8 border-b-4 border-r-4 border-cyan-400" />
+
+              <div className="bg-slate-900/90 p-8 skew-x-[6deg]">
+                <h2 className="text-4xl font-black italic text-center text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-[0_0_10px_rgba(6,182,212,0.5)] mb-6 tracking-tighter transform -rotate-2">
+                  NEW RECORD <span className="block text-lg font-normal text-slate-400 not-italic tracking-widest mt-1">DISTANCE LOGGED // 新紀錄</span>
+                </h2>
+
+                <div className="relative mb-8 group/input">
+                  <input
+                    autoFocus={!pendingScore.name}
+                    type="text"
+                    value={playerName}
+                    onChange={(e) => !pendingScore.name && setPlayerName(e.target.value.slice(0, 12))}
+                    placeholder="ENTER CALLSIGN..."
+                    disabled={!!pendingScore.name}
+                    className={`w-full bg-slate-950/50 border-b-2 border-slate-700 text-cyan-300 font-mono text-xl p-4 outline-none transition-all focus:border-cyan-400 text-center placeholder:text-slate-700 uppercase tracking-[0.2em] ${!!pendingScore.name ? 'opacity-60 cursor-not-allowed border-green-500/50 text-green-400' : 'focus:bg-cyan-950/20'}`}
+                  />
+                  {!!pendingScore.name && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 animate-pulse">🔒 LOCKED</span>}
+                  <div className="absolute bottom-0 left-0 w-0 h-[2px] bg-cyan-500 transition-all duration-300 group-focus-within/input:w-full" />
+                </div>
+
+                <div className="flex gap-4">
+                  <button
+                    onClick={() => saveToLeaderboard(pendingScore.name || playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)}
+                    className="flex-[2] bg-cyan-600 hover:bg-cyan-500 text-white font-black italic text-xl py-4 skew-x-[-12deg] shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all active:scale-95 group/btn relative overflow-hidden"
+                  >
+                    <div className="skew-x-[12deg] relative z-10 flex items-center justify-center gap-2">
+                      <span>SAVE RECORD</span>
+                      <span className="text-xs font-mono bg-black/30 px-2 py-0.5 rounded">⏎</span>
+                    </div>
+                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-500 ease-in-out skew-x-[12deg]" />
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setPendingScore(null);
+                      setShowSaveModal(false);
+                      if (postScoreAction === 'RESTART') handleStart();
+                      else if (postScoreAction === 'MENU') {
+                        setShowSettings(false);
+                        setGameState(GameState.MENU);
+                      }
+                    }}
+                    className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white font-bold py-4 skew-x-[-12deg] border border-slate-600 transition-all active:scale-95"
+                  >
+                    <div className="skew-x-[12deg]">DISCARD</div>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1701,46 +1953,60 @@ const App: React.FC = () => {
       {/* Joining Requests Notification Overlay */}
       {
         pendingRequests.length > 0 && isMultiplayerHost && (
-          <div className="absolute top-6 right-6 z-[500] space-y-3 pointer-events-auto">
+          <div className="absolute top-24 right-6 z-[500] space-y-4 pointer-events-auto w-80">
             {pendingRequests.map(req => (
-              <div key={req.id} className="bg-slate-900/90 border-2 border-yellow-500 p-4 rounded-xl shadow-[0_0_20px_rgba(234,179,8,0.4)] backdrop-blur-md animate-slide-in-right max-w-xs border-l-8">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="font-bold text-yellow-500 text-sm tracking-widest uppercase">新的加入請求</div>
-                  <div className="text-[10px] text-slate-500 font-mono">ID: {req.id.slice(-4)}</div>
+              <div key={req.id} className="group relative">
+                <div className="absolute -left-2 top-0 bottom-0 w-1 bg-gradient-to-b from-yellow-400 to-amber-600 animate-pulse" />
+                <div className="bg-slate-900/90 border border-yellow-500/50 p-4 skew-x-[-6deg] shadow-[0_0_20px_rgba(234,179,8,0.2)] hover:shadow-[0_0_30px_rgba(234,179,8,0.4)] transition-all backdrop-blur-md">
+                  <div className="skew-x-[6deg]">
+                    <div className="flex justify-between items-start mb-3 border-b border-yellow-500/30 pb-2">
+                      <div className="font-black italic text-yellow-400 text-sm tracking-widest uppercase flex items-center gap-2">
+                        <span className="w-2 h-2 bg-yellow-500 rounded-full animate-ping" />
+                        INCOMING LINK // 連線請求
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">ID: {req.id.slice(-4)}</div>
+                    </div>
+
+                    <div className="text-white text-xl font-black italic mb-4 flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-800 border border-slate-600 flex items-center justify-center text-lg">👤</div>
+                      <div className="flex flex-col">
+                        <span className="leading-none">{req.name}</span>
+                        <span className="text-[10px] text-slate-400 font-mono font-normal tracking-wide">OPERATOR CLASS</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          if (mpManagerRef.current) mpManagerRef.current.approveJoin(req.id, currentSeed);
+                          setPendingRequests(prev => prev.filter(p => p.id !== req.id));
+                        }}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 skew-x-[-6deg] text-xs transition-all active:scale-95 border border-emerald-400/50"
+                      >
+                        <div className="skew-x-[6deg]">APPROVE // 允許</div>
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (mpManagerRef.current) mpManagerRef.current.rejectJoin(req.id);
+                          setPendingRequests(prev => prev.filter(p => p.id !== req.id));
+                        }}
+                        className="flex-1 bg-red-900/60 hover:bg-red-600 text-white font-bold py-2 skew-x-[-6deg] text-xs transition-all active:scale-95 border border-red-500/50"
+                      >
+                        <div className="skew-x-[6deg]">DENY // 拒絕</div>
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        setSettingsTab('room');
+                        setShowSettings(true);
+                      }}
+                      className="w-full text-center text-slate-500 text-[10px] mt-3 hover:text-yellow-400 transition-colors font-mono tracking-wider"
+                    >
+                      OPEN ROOM MANAGER [ ► ]
+                    </button>
+                  </div>
                 </div>
-                <div className="text-white text-lg font-bold mb-4 flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                  {req.name}
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      if (mpManagerRef.current) mpManagerRef.current.approveJoin(req.id, currentSeed);
-                      setPendingRequests(prev => prev.filter(p => p.id !== req.id));
-                    }}
-                    className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-2 rounded-lg text-sm transition-all active:scale-95"
-                  >
-                    接受
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (mpManagerRef.current) mpManagerRef.current.rejectJoin(req.id);
-                      setPendingRequests(prev => prev.filter(p => p.id !== req.id));
-                    }}
-                    className="bg-red-600/30 hover:bg-red-600 text-red-200 py-2 px-4 rounded-lg text-sm border border-red-500/50 transition-all active:scale-95"
-                  >
-                    拒絕
-                  </button>
-                </div>
-                <button
-                  onClick={() => {
-                    setSettingsTab('room');
-                    setShowSettings(true);
-                  }}
-                  className="w-full text-center text-slate-500 text-[10px] mt-2 underline hover:text-slate-300"
-                >
-                  前往管理選單
-                </button>
               </div>
             ))}
           </div>
@@ -1749,27 +2015,72 @@ const App: React.FC = () => {
 
       {
         gameState === GameState.CHECKPOINT_SHOP && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-black/60 backdrop-blur-sm pointer-events-auto">
-            <div className="bg-slate-800 border-4 border-green-500 p-8 rounded-lg text-center shadow-2xl">
-              <h2 className="text-4xl font-bold text-green-400 mb-2">存檔點</h2>
-              <div className="flex flex-wrap justify-center gap-4 mb-8">
-                <div className="relative group flex items-center">
-                  <button onClick={handleBuyRefuel} className="bg-blue-600 text-white p-4 rounded-lg w-32 border-2 border-blue-400">補充燃料 $10</button>
-                  <InfoTooltip text="緊急補充全部燃料。燃料耗盡將導致配送失敗。" position="bottom" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center z-40 bg-slate-950/90 backdrop-blur-md pointer-events-auto overflow-hidden">
+            {/* Background Grid */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(34,197,94,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(34,197,94,0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-transparent to-slate-950 opacity-80 pointer-events-none" />
+
+            <div className="bg-slate-900/80 border-4 border-green-500 p-8 skew-x-[-6deg] text-center shadow-[0_0_50px_rgba(34,197,94,0.3)] relative z-10 max-w-4xl w-full mx-4">
+              <div className="skew-x-[6deg]">
+                <h2 className="text-6xl font-black italic text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-600 drop-shadow-[0_0_10px_rgba(34,197,94,0.5)] tracking-tighter mb-8 transform -rotate-1">
+                  SUPPLY DEPOT <span className="text-2xl font-normal text-slate-500 not-italic tracking-widest ml-2">CHECKPOINT // 補給站</span>
+                </h2>
+
+                <div className="flex flex-wrap justify-center gap-6 mb-10">
+                  {/* Refuel Button */}
+                  <div className="group relative">
+                    <button onClick={handleBuyRefuel} className="w-48 h-32 bg-blue-900/40 hover:bg-blue-800/60 border-2 border-blue-500/50 hover:border-blue-400 text-blue-300 transition-all active:scale-95 skew-x-[-12deg] flex flex-col items-center justify-center gap-2 group-hover:shadow-[0_0_20px_rgba(59,130,246,0.4)]">
+                      <div className="skew-x-[12deg] flex flex-col items-center">
+                        <span className="text-3xl">⛽</span>
+                        <span className="font-black italic text-xl tracking-wider">REFUEL // 燃料</span>
+                        <span className="text-xs font-mono text-blue-400 bg-black/50 px-2 py-1 mt-1 rounded border border-blue-500/30">$10</span>
+                      </div>
+                    </button>
+                    <div className="absolute top-full mt-2 w-full text-center text-[10px] text-blue-400/70 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+                      EMERGENCY REFUEL<br />燃料補充
+                    </div>
+                  </div>
+
+                  {/* Repair Button */}
+                  <div className="group relative">
+                    <button onClick={handleBuyRepair} className="w-48 h-32 bg-red-900/40 hover:bg-red-800/60 border-2 border-red-500/50 hover:border-red-400 text-red-300 transition-all active:scale-95 skew-x-[-12deg] flex flex-col items-center justify-center gap-2 group-hover:shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+                      <div className="skew-x-[12deg] flex flex-col items-center">
+                        <span className="text-3xl">🔧</span>
+                        <span className="font-black italic text-xl tracking-wider">REPAIR // 維修</span>
+                        <span className="text-xs font-mono text-red-400 bg-black/50 px-2 py-1 mt-1 rounded border border-red-500/30">$20</span>
+                      </div>
+                    </button>
+                    <div className="absolute top-full mt-2 w-full text-center text-[10px] text-red-400/70 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+                      HULL RESTORATION<br />機身修復
+                    </div>
+                  </div>
+
+                  {/* Workshop Button */}
+                  <div className="group relative">
+                    <button onClick={() => setGameState(GameState.SHOP)} className="w-48 h-32 bg-purple-900/40 hover:bg-purple-800/60 border-2 border-purple-500/50 hover:border-purple-400 text-purple-300 transition-all active:scale-95 skew-x-[-12deg] flex flex-col items-center justify-center gap-2 group-hover:shadow-[0_0_20px_rgba(168,85,247,0.4)]">
+                      <div className="skew-x-[12deg] flex flex-col items-center">
+                        <span className="text-3xl">💎</span>
+                        <span className="font-black italic text-xl tracking-wider">WORKSHOP // 工坊</span>
+                        <span className="text-xs font-mono text-purple-400 bg-black/50 px-2 py-1 mt-1 rounded border border-purple-500/30">UPGRADE</span>
+                      </div>
+                    </button>
+                    <div className="absolute top-full mt-2 w-full text-center text-[10px] text-purple-400/70 font-mono opacity-0 group-hover:opacity-100 transition-opacity">
+                      VEDAL'S LAB<br />裝備升級
+                    </div>
+                  </div>
                 </div>
-                <div className="relative group flex items-center">
-                  <button onClick={handleBuyRepair} className="bg-red-600 text-white p-4 rounded-lg w-32 border-2 border-red-400">緊急維修 $20</button>
-                  <InfoTooltip text="修復無人機機身損害。血量歸零將導致配送失敗。" position="bottom" />
-                </div>
-                <div className="relative group flex items-center">
-                  <button onClick={() => setGameState(GameState.SHOP)} className="bg-purple-600 text-white p-4 rounded-lg w-32 border-2 border-purple-400">工作坊</button>
-                  <InfoTooltip text="前往科學家 Vedal 的工作坊，升級硬體、兌換鑽石或購買特殊裝備。" position="bottom" />
-                </div>
+
+                <button
+                  onClick={handleLaunchFromShop}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-black italic text-3xl py-6 skew-x-[-12deg] shadow-[0_0_30px_rgba(16,185,129,0.4)] hover:shadow-[0_0_50px_rgba(16,185,129,0.6)] transition-all active:scale-[0.98] group relative overflow-hidden"
+                >
+                  <div className="skew-x-[12deg] flex items-center justify-center gap-4 relative z-10">
+                    <span>LAUNCH OPERATION // 出發</span>
+                    <span className="text-emerald-900 bg-emerald-400 rounded-full w-8 h-8 flex items-center justify-center text-sm">▶</span>
+                  </div>
+                  <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 ease-in-out skew-x-[12deg]" />
+                </button>
               </div>
-              <button onClick={handleLaunchFromShop} className="bg-gray-200 text-black font-bold py-3 px-8 rounded-full text-xl flex items-center gap-2">
-                出發
-                <InfoTooltip text="完成補給，即刻出發！" />
-              </button>
             </div>
           </div>
         )
@@ -1777,37 +2088,92 @@ const App: React.FC = () => {
 
       {
         gameState === GameState.GAME_OVER && !isSpectating && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white z-50 backdrop-blur-sm pointer-events-auto">
-            <div className="mb-6 transform scale-150 cursor-pointer hover:brightness-125 active:scale-140 transition-all" onClick={() => setShowSettings(true)}>
-              <NeuroFace status="dead" persona={persona} />
-              <div className="absolute -bottom-4 right-0 bg-cyan-600 text-[10px] px-1 rounded border border-cyan-400 font-bold opacity-0 hover:opacity-100 transition-opacity">設定</div>
-            </div>
-            <h1 className="text-6xl text-red-500 font-bold mb-2 tracking-widest">任務失敗</h1>
-            <div className="text-center mb-6">
-              <h2 className="text-2xl font-bold text-red-400 mb-1">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 text-white z-50 overflow-hidden font-sans select-none">
+            {/* Global Background Tech Pattern */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 50% 50%, #7f1d1d 0%, #020617 70%)' }}></div>
+            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(220,38,38,0.05)_50%,rgba(0,0,0,0)_50%)] bg-[length:100%_4px] opacity-30 z-0" />
+
+            <div className="relative z-10 flex flex-col items-center w-full max-w-4xl px-4 animate-fade-in-up">
+
+              <div className="mb-8 transform scale-125 cursor-pointer hover:brightness-125 active:scale-110 transition-all group relative" onClick={() => setShowSettings(true)}>
+                <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse" />
+                <NeuroFace status="dead" persona={persona} />
+                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 text-red-400 text-[10px] px-3 py-1 skew-x-[-12deg] border border-red-500/30 font-bold opacity-0 group-hover:opacity-100 transition-opacity tracking-widest whitespace-nowrap">
+                  SYSTEM CONFIG // 設定
+                </div>
+              </div>
+
+              <h1 className="text-7xl md:text-9xl font-black italic tracking-tighter text-red-500 drop-shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse mb-2 glitch-text" data-text="MISSION FAILED">
+                MISSION FAILED
+              </h1>
+              <h2 className="text-xl md:text-2xl font-bold tracking-[0.8em] text-red-200/60 mb-8 uppercase">
                 {deathDetails.reasonDisplay}
               </h2>
-              <div className="text-xl font-bold text-slate-300 flex items-center justify-center gap-4">
-                <span>距離: <span className="text-white">{finalDistance}m</span></span>
-                <span className="text-cyan-400 border-l border-slate-600 pl-4">
-                  排名: #{leaderboard.filter(e => e.distance > finalDistance).length + 1}
-                </span>
+
+              {/* Stats Panel */}
+              <div className="flex flex-col md:flex-row gap-6 w-full max-w-2xl justify-center mb-10">
+                <div className="flex-1 bg-slate-900/40 backdrop-blur-md border border-red-500/30 p-6 skew-x-[-6deg] hover:bg-slate-900/60 transition-colors">
+                  <div className="skew-x-[6deg] text-center">
+                    <div className="text-xs text-red-400 font-mono tracking-widest mb-1">TOTAL DISTANCE</div>
+                    <div className="text-4xl font-black italic text-white flex justify-center items-baseline gap-2">
+                      {finalDistance} <span className="text-lg text-slate-500 font-normal">m</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex-1 bg-slate-900/40 backdrop-blur-md border border-red-500/30 p-6 skew-x-[-6deg] hover:bg-slate-900/60 transition-colors">
+                  <div className="skew-x-[6deg] text-center">
+                    <div className="text-xs text-red-400 font-mono tracking-widest mb-1">GLOBAL RANK</div>
+                    <div className="text-4xl font-black italic text-white">
+                      #{leaderboard.filter(e => e.distance > finalDistance).length + 1}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="text-slate-400 mt-1">時間: {Math.floor(gameTime)}s</p>
-              <p className="text-xl text-yellow-500 font-vt323 tracking-wider italic mt-2">
-                {deathDetails.taunt.split('||')[1] || deathDetails.taunt.split('||')[0]}
-              </p>
-            </div>
-            <div className="mt-8 flex flex-wrap justify-center gap-6">
-              {!multiplayerMode ? (
-                <>
-                  <button onClick={handleRespawn} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-10 rounded shadow-lg transition-all active:scale-95">重生 (繼續)</button>
-                  <button onClick={handleRestartFull} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-3 px-10 rounded transition-all active:scale-95">重新開始</button>
-                </>
-              ) : (
-                <button onClick={() => setIsSpectating(true)} className="bg-yellow-600 text-white font-bold py-3 px-8 rounded shadow-lg animate-pulse transition-all active:scale-95">觀戰</button>
-              )}
-              <button onClick={handleBackToMenu} className="py-3 px-8 text-gray-400 underline">主選單</button>
+
+              {/* Taunt Message */}
+              <div className="w-full max-w-2xl bg-black/40 border-l-4 border-yellow-500 p-4 mb-10">
+                <div className="text-yellow-500 font-serif italic text-xl md:text-2xl text-center leading-relaxed opacity-90">
+                  "{deathDetails.taunt.split('||')[1] || deathDetails.taunt.split('||')[0]}"
+                </div>
+                <div className="text-right text-[10px] text-slate-500 font-mono mt-2 tracking-widest uppercase">— AI ANALYSIS REPORT</div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap justify-center gap-6">
+                {!multiplayerMode ? (
+                  <>
+                    <button
+                      onClick={handleRespawn}
+                      className="group relative px-8 py-4 bg-green-600 hover:bg-green-500 text-white font-black italic skew-x-[-12deg] transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(34,197,94,0.4)] overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-[12deg]" />
+                      <span className="skew-x-[12deg] inline-block text-xl tracking-wider">RESPAWN // 重生</span>
+                    </button>
+
+                    <button
+                      onClick={handleRestartFull}
+                      className="group px-8 py-4 bg-slate-700 hover:bg-slate-600 text-slate-200 font-black italic skew-x-[-12deg] transition-all hover:scale-105 active:scale-95 border border-slate-500/50"
+                    >
+                      <span className="skew-x-[12deg] inline-block text-xl tracking-wider">RESTART // 重來</span>
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setIsSpectating(true)}
+                    className="group px-10 py-4 bg-yellow-600 hover:bg-yellow-500 text-white font-black italic skew-x-[-12deg] transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(234,179,8,0.4)] animate-pulse"
+                  >
+                    <span className="skew-x-[12deg] inline-block text-xl tracking-wider">SPECTATE // 觀戰</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={handleBackToMenu}
+                  className="px-8 py-4 text-slate-500 hover:text-white font-bold font-mono text-sm tracking-widest underline decoration-slate-700 hover:decoration-white underline-offset-4 transition-colors"
+                >
+                  RETURN TO BASE
+                </button>
+              </div>
+
             </div>
           </div>
         )
@@ -1816,57 +2182,72 @@ const App: React.FC = () => {
       {/* Multiplayer Room Leaderboard - All Players Dead */}
       {
         multiplayerMode && allPlayersDead && (
-          <div className="absolute inset-0 z-[250] flex flex-col items-center justify-center bg-black/90 backdrop-blur-md text-white pointer-events-auto">
-            <div className="bg-slate-800 border-4 border-red-500 p-8 rounded-xl max-w-2xl w-full shadow-2xl">
-              <h1 className="text-5xl font-bold text-red-400 mb-6 text-center tracking-widest font-vt323">遊戲結束 (GAME OVER)</h1>
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 text-white z-[250] overflow-hidden font-sans select-none">
+            {/* Background Effects (same as single player GAME_OVER) */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 50% 50%, #7f1d1d 0%, #020617 70%)' }}></div>
+            <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(220,38,38,0.05)_50%,rgba(0,0,0,0)_50%)] bg-[length:100%_4px] opacity-30 z-0" />
 
-              <div className="bg-slate-900 p-6 rounded-lg mb-6">
-                <h2 className="text-2xl font-bold text-cyan-400 mb-4 border-b border-slate-600 pb-2">房間排行榜</h2>
-                <div className="space-y-2">
-                  {roomLeaderboard
-                    .sort((a, b) => b.distance - a.distance)
-                    .map((player, index) => (
-                      <div
-                        key={player.id}
-                        className={`flex items-center justify-between p-3 rounded ${player.id === (multiplayerId || 'ME')
-                          ? 'bg-cyan-900/50 border-2 border-cyan-500'
-                          : 'bg-slate-800'
-                          }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <span className={`text-2xl font-bold ${index === 0 ? 'text-yellow-400' :
-                            index === 1 ? 'text-gray-300' :
-                              index === 2 ? 'text-orange-600' : 'text-slate-400'
-                            }`}>
-                            #{index + 1}
-                          </span>
-                          <div>
-                            <div className="font-bold text-white">
-                              {player.id === (multiplayerId || 'ME') ? '我' : player.id.slice(-4)}
+            <div className="relative z-10 flex flex-col items-center w-full max-w-4xl px-4 animate-fade-in-up">
+
+              <h1 className="text-7xl md:text-9xl font-black italic tracking-tighter text-red-500 drop-shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse mb-2 glitch-text" data-text="GAME OVER">
+                GAME OVER
+              </h1>
+              <h2 className="text-xl md:text-2xl font-bold tracking-[0.8em] text-red-200/60 mb-8 uppercase">
+                ALL OPERATORS DOWN // 全員陣亡
+              </h2>
+
+              {/* Room Leaderboard */}
+              <div className="w-full max-w-2xl mb-10">
+                <div className="bg-slate-900/40 backdrop-blur-md border border-red-500/30 p-6 skew-x-[-3deg]">
+                  <div className="skew-x-[3deg]">
+                    <div className="text-xs text-cyan-400 font-mono tracking-[0.5em] mb-4 border-b border-slate-700 pb-2 uppercase">Room Ranking // 房間排行</div>
+                    <div className="space-y-2">
+                      {roomLeaderboard
+                        .sort((a, b) => b.distance - a.distance)
+                        .map((player, index) => (
+                          <div
+                            key={player.id}
+                            className={`flex items-center justify-between p-3 skew-x-[-6deg] transition-colors ${player.id === (multiplayerId || 'ME')
+                              ? 'bg-cyan-900/40 border-l-4 border-cyan-400'
+                              : 'bg-slate-800/60 border-l-4 border-transparent hover:bg-slate-800'
+                              }`}
+                          >
+                            <div className="skew-x-[6deg] flex items-center gap-4">
+                              <span className={`text-3xl font-black italic ${index === 0 ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.5)]' :
+                                index === 1 ? 'text-gray-300' :
+                                  index === 2 ? 'text-orange-500' : 'text-slate-500'
+                                }`}>
+                                #{index + 1}
+                              </span>
+                              <div>
+                                <div className="font-black italic text-white tracking-wide">
+                                  {player.id === (multiplayerId || 'ME') ? 'YOU // 我' : player.id.slice(-4)}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">{player.persona}</div>
+                              </div>
                             </div>
-                            <div className="text-xs text-slate-400">{player.persona}</div>
+                            <div className="skew-x-[6deg] text-right">
+                              <div className="text-2xl font-black italic text-white flex items-baseline gap-1">
+                                {player.distance}<span className="text-sm text-slate-500 font-normal">m</span>
+                              </div>
+                            </div>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xl font-bold text-white">{player.distance}m</div>
-                        </div>
-                      </div>
-                    ))}
+                        ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
+              {/* Action Buttons */}
+              <div className="flex flex-wrap justify-center gap-6">
                 {isMultiplayerHost ? (
                   <>
                     <button
                       onClick={() => {
-                        // Generate new seed for fresh game
                         const newSeed = Math.random().toString(36).substring(2, 9).toUpperCase();
                         setCurrentSeed(newSeed);
                         setGameKey(k => k + 1);
-
                         if (mpManagerRef.current) {
-                          // Broadcast restart with new seed
                           mpManagerRef.current.broadcast({ type: 'GAME_RESTART' });
                           mpManagerRef.current.broadcast({ type: 'SYNC_SEED', seed: newSeed });
                         }
@@ -1874,10 +2255,12 @@ const App: React.FC = () => {
                         setRoomLeaderboard([]);
                         setGameState(GameState.WAITING_LOBBY);
                       }}
-                      className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl text-xl tracking-widest shadow-lg"
+                      className="group relative px-10 py-4 bg-green-600 hover:bg-green-500 text-white font-black italic skew-x-[-12deg] transition-all hover:scale-105 active:scale-95 shadow-[0_0_20px_rgba(34,197,94,0.4)] overflow-hidden"
                     >
-                      重新開始 (RESTART GAME)
+                      <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-[12deg]" />
+                      <span className="skew-x-[12deg] inline-block text-xl tracking-wider relative z-10">RESTART // 重新開始</span>
                     </button>
+
                     <button
                       onClick={() => {
                         setAllPlayersDead(false);
@@ -1885,17 +2268,20 @@ const App: React.FC = () => {
                         setMultiplayerMode(false);
                         setGameState(GameState.MENU);
                       }}
-                      className="w-full bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-lg"
+                      className="px-8 py-4 text-slate-500 hover:text-white font-bold font-mono text-sm tracking-widest underline decoration-slate-700 hover:decoration-white underline-offset-4 transition-colors"
                     >
-                      EXIT TO MENU (退出)
+                      RETURN TO BASE
                     </button>
                   </>
                 ) : (
                   <>
-                    <div className="bg-yellow-900/30 border-2 border-yellow-500 p-4 rounded-lg text-center">
-                      <p className="text-yellow-400 font-bold text-lg animate-pulse">WAITING FOR HOST TO RESTART...</p>
-                      <p className="text-slate-400 text-sm mt-1">等待房主重新開始...</p>
+                    <div className="bg-black/40 border-l-4 border-yellow-500 p-4 skew-x-[-6deg]">
+                      <div className="skew-x-[6deg] text-center">
+                        <p className="text-yellow-400 font-black italic text-lg animate-pulse tracking-wider">AWAITING HOST...</p>
+                        <p className="text-slate-500 text-xs font-mono tracking-widest mt-1">等待房主重新開始</p>
+                      </div>
                     </div>
+
                     <button
                       onClick={() => {
                         setAllPlayersDead(false);
@@ -1903,9 +2289,9 @@ const App: React.FC = () => {
                         setMultiplayerMode(false);
                         setGameState(GameState.MENU);
                       }}
-                      className="w-full bg-slate-600 hover:bg-slate-500 text-white font-bold py-3 rounded-lg"
+                      className="px-8 py-4 text-slate-500 hover:text-white font-bold font-mono text-sm tracking-widest underline decoration-slate-700 hover:decoration-white underline-offset-4 transition-colors"
                     >
-                      EXIT TO MENU (退出)
+                      RETURN TO BASE
                     </button>
                   </>
                 )}
@@ -1971,7 +2357,7 @@ const App: React.FC = () => {
           onCrash={handleCrash}
           setFaceStatus={setFaceStatus}
           setVedalMessage={setVedalMessage}
-          setStats={(hp, fuel, cargoHp, distance, distToNext, trainX) => setStats(hp, fuel, cargoHp, distance, distToNext, trainX)}
+          setStats={(hp, fuel, cargoHp, distance, distToNext, speed, equippedItem, trainX, isBursting) => setStats(hp, fuel, cargoHp, distance, distToNext, speed, equippedItem, trainX, isBursting)}
           lastCheckpoint={lastCheckpoint}
           setLastCheckpoint={setLastCheckpoint}
           respawnToken={respawnToken}
@@ -1988,7 +2374,7 @@ const App: React.FC = () => {
             isActive: multiplayerMode,
             manager: mpManagerRef.current,
             remotePlayers
-          }), [multiplayerMode, remotePlayers])}
+          }), [multiplayerMode, remotePlayers, managerReady])}
           isSpectating={isSpectating}
           spectatorTargetId={spectatorTargetId}
           setSpectatorTargetId={setSpectatorTargetId}
@@ -2048,7 +2434,7 @@ const App: React.FC = () => {
           }
         }}
         isMobileMode={isMobileMode}
-        onToggleMobileMode={() => setIsMobileMode(!isMobileMode)}
+        onToggleMobileMode={handleToggleMobileMode}
         onForceRestart={handleForceRestart}
         initialTab={settingsTab}
         isAdmin={isAdmin}
@@ -2070,27 +2456,39 @@ const App: React.FC = () => {
       {
         (gameState === GameState.PLAYING || gameState === GameState.CHECKPOINT_SHOP || gameState === GameState.PAUSED || isLayoutEditing) && (
           <>
-            <UIOverlay
-              stats={(isSpectating && spectatorTargetId && remotePlayers.get(spectatorTargetId)) ? {
+            {(() => {
+              const currentStats = (isSpectating && spectatorTargetId && remotePlayers.get(spectatorTargetId)) ? {
                 hp: remotePlayers.get(spectatorTargetId)!.hpPercent ?? 100,
                 fuel: remotePlayers.get(spectatorTargetId)!.fuel ?? 100,
                 cargoHp: remotePlayers.get(spectatorTargetId)!.cargoHealth ?? 100,
-                money: money,
                 distance: remotePlayers.get(spectatorTargetId)!.scoreDistance ?? 0,
-                distToNext: remotePlayers.get(spectatorTargetId)!.distToNext ?? 0
-              } : { ...displayStats, money }}
-              gameTime={gameTime}
-              faceStatus={faceStatus}
-              persona={persona}
-              vedalMessage={vedalMessage}
-              isMobile={isMobileMode}
-              urgentOrderProgress={urgentOrderProgress}
-              onAvatarClick={() => setShowSettings(true)}
-              isFullscreen={isFullscreen}
-              isAdmin={isAdmin}
-              userName={playerName}
-              nameError={nameError}
-            />
+                distToNext: remotePlayers.get(spectatorTargetId)!.distToNext ?? 0,
+                speed: 0,
+                equippedItem: 'NONE' as EquipmentId
+              } : displayStats;
+
+              return (
+                <HUDOverlay
+                  {...currentStats}
+                  maxHp={100}
+                  maxFuel={100}
+                  maxCargoHp={100}
+                  money={money}
+                  gameTime={gameTime}
+                  faceStatus={faceStatus}
+                  persona={persona}
+                  vedalMessage={vedalMessage}
+                  isMobile={isMobileMode}
+                  urgentOrderProgress={urgentOrderProgress}
+                  onAvatarClick={() => setShowSettings(true)}
+                  isFullscreen={isFullscreen}
+                  isAdmin={isAdmin}
+                  userName={playerName}
+                  nameError={nameError}
+                  isBursting={currentStats.isBursting}
+                />
+              );
+            })()}
             {isMobileMode && (
               <MobileControls
                 difficulty={difficulty}
@@ -2114,29 +2512,54 @@ const App: React.FC = () => {
         )
       }
 
-      {/* 全域貨幣顯示 (Global Currency Badge) */}
-      <div className="absolute top-4 right-4 z-[1000] pointer-events-none flex items-center gap-1.5 scale-90 origin-right transition-all duration-500">
-        {(diamonds > 0 || isAdmin) && (
-          <div className="bg-slate-900/90 border border-cyan-500/50 px-3 py-1.5 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1.5 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
-            <span className="text-xl">💎</span>
-            <div className="flex flex-col">
-              <span className="text-[8px] text-cyan-500/70 font-bold leading-none uppercase tracking-tighter">Diamonds</span>
-              <span className="text-xl font-bold text-cyan-400 font-vt323 leading-tight">{diamonds.toLocaleString()}</span>
-            </div>
-          </div>
-        )}
-        <div className="bg-slate-900/90 border border-yellow-500/50 px-3 py-1.5 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1.5 transform hover:scale-105 transition-transform pointer-events-auto cursor-default">
-          <span className="text-xl">💰</span>
-          <div className="flex flex-col">
-            <span className="text-[8px] text-yellow-500/70 font-bold leading-none uppercase tracking-tighter">Balance</span>
-            <span className="text-xl font-bold text-yellow-400 font-vt323 leading-tight">${money.toLocaleString()}</span>
-          </div>
-        </div>
-      </div>
+
+
+      {/* Character Select Overlay */}
+      {
+        gameState === GameState.MENU && showCharacterSelect && (
+          <CharacterSelectOverlay
+            onSelect={(p) => {
+              setPersona(p);
+              setShowCharacterSelect(false);
+              handleStart();
+            }}
+            onClose={() => setShowCharacterSelect(false)}
+            isMobile={isMobileMode}
+          />
+        )
+      }
+
+      {/* Tutorial Overlay */}
+      {
+        showTutorial && (
+          <TutorialOverlay
+            onComplete={() => {
+              setShowTutorial(false);
+            }}
+            onSkip={() => setShowTutorial(false)}
+          />
+        )
+      }
+
+      {/* Tutorial Button (Menu Only) */}
+      {
+        gameState === GameState.MENU && !showSettings && !showUserMgmt && !showRoomBrowser && (
+          <button
+            className="absolute bottom-4 right-4 z-[100] w-12 h-12 rounded-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-2xl border-4 border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)] flex items-center justify-center transition-all hover:scale-110 active:scale-95 group"
+            onClick={() => setShowTutorial(true)}
+            title="Tutorial / Tour (教學)"
+          >
+            ?
+            <span className="absolute right-full mr-2 bg-slate-800 text-cyan-400 text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap border border-cyan-500 pointer-events-none">
+              New to game? Start here!
+            </span>
+          </button>
+        )
+      }
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha 1.4s (TC)
+        Alpha
       </div>
     </div >
   );

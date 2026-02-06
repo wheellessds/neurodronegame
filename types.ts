@@ -2,6 +2,7 @@
 export enum GameState {
   LOADING,
   MENU,
+  TUTORIAL, // [NEW] Tutorial Mode
   PLAYING,
   CHECKPOINT_SHOP, // Replaces LEVEL_SHOP
   SHOP,

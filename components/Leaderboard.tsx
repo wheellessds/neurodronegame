@@ -13,7 +13,6 @@ interface LeaderboardProps {
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onExport, onChallengeSeed, isAdmin, token, onEntryDeleted }) => {
-    const [showLegacy, setShowLegacy] = React.useState(true);
     const [isDeleting, setIsDeleting] = React.useState<number | null>(null);
 
     const handleDeleteEntry = async (index: number) => {
@@ -43,7 +42,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const filteredEntries = entries.filter(entry => showLegacy || entry.seed);
+    const filteredEntries = entries.filter(entry => entry.seed);
 
     return (
         <div className="flex flex-col items-center justify-center w-full h-full bg-slate-900/90 backdrop-blur-md p-6 rounded-xl border border-slate-700 shadow-2xl relative overflow-hidden">
@@ -147,12 +146,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
                     返回選單
                 </button>
                 <div className="flex-1 flex gap-2">
-                    <button
-                        onClick={() => setShowLegacy(!showLegacy)}
-                        className={`flex-1 font-bold py-2 rounded-lg transition-all border shadow-lg ${showLegacy ? 'bg-orange-600 hover:bg-orange-500 border-orange-400 text-white' : 'bg-slate-800 hover:bg-slate-700 border-slate-600 text-gray-400'}`}
-                    >
-                        {showLegacy ? '隱藏舊版' : '顯示舊版'}
-                    </button>
                     {onExport && (
                         <button
                             onClick={onExport}

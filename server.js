@@ -74,7 +74,19 @@ app.post('/api/register', (req, res) => {
     users[username] = {
         hash,
         salt,
-        saveData: { money: 0, diamonds: 0 },
+        saveData: {
+            money: 0,
+            diamonds: 0,
+            upgrades: {
+                engineLevel: 0,
+                tankLevel: 0,
+                hullLevel: 0,
+                cableLevel: 0,
+                cargoLevel: 0
+            },
+            ownedItems: ['NONE'],
+            equippedItem: 'NONE'
+        },
         joinedAt: Date.now()
     };
     saveUsers();
@@ -111,8 +123,24 @@ app.post('/api/save', (req, res) => {
             if (typeof saveData.diamonds === 'number') {
                 users[username].saveData.diamonds = saveData.diamonds;
             }
+            if (saveData.upgrades) {
+                users[username].saveData.upgrades = saveData.upgrades;
+            }
+            if (saveData.ownedItems) {
+                users[username].saveData.ownedItems = saveData.ownedItems;
+            }
+            if (saveData.equippedItem) {
+                users[username].saveData.equippedItem = saveData.equippedItem;
+            }
             saveUsers();
-            res.json({ success: true, savedMoney: users[username].saveData.money, savedDiamonds: users[username].saveData.diamonds });
+            res.json({
+                success: true,
+                savedMoney: users[username].saveData.money,
+                savedDiamonds: users[username].saveData.diamonds,
+                savedUpgrades: users[username].saveData.upgrades,
+                savedOwnedItems: users[username].saveData.ownedItems,
+                savedEquippedItem: users[username].saveData.equippedItem
+            });
         } else {
             res.status(400).json({ error: 'Invalid money value' });
         }
