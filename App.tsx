@@ -268,6 +268,7 @@ const App: React.FC = () => {
   const [currentSeed, setCurrentSeed] = useState<string>('');
   const [isChallengingSeed, setIsChallengingSeed] = useState(false);
   const [ghostData, setGhostData] = useState<{ trajectory: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[], name: string } | null>(null);
+  const [pendingChallenge, setPendingChallenge] = useState<string | LeaderboardEntry | null>(null);
 
   // Trajectory State
   const [currentTrajectory, setCurrentTrajectory] = useState<{ x: number, y: number }[]>([]);
@@ -1583,7 +1584,7 @@ const App: React.FC = () => {
 
             {/* Footer Status */}
             <div className="mt-12 flex w-full justify-between items-end opacity-30 font-mono text-[10px] tracking-widest uppercase text-white select-none">
-              <div>SYS.VER: 2.0.0-ALPHA</div>
+              <div className="text-[8px]">SYS.VER: ALPHA</div>
               <div>SECURE CONNECTION // ESTABLISHED</div>
             </div>
           </div>
@@ -1636,7 +1637,11 @@ const App: React.FC = () => {
             <Leaderboard
               entries={leaderboard}
               onClose={() => setShowLeaderboard(false)}
-              onChallengeSeed={(entry) => { handleStart(entry); setShowLeaderboard(false); }}
+              onChallengeSeed={(entry) => {
+                setPendingChallenge(entry);
+                setShowLeaderboard(false);
+                setShowCharacterSelect(true);
+              }}
               currentSeed={currentSeed}
               isAdmin={isAdmin}
               token={user?.token}
@@ -2095,20 +2100,32 @@ const App: React.FC = () => {
 
             <div className="relative z-10 flex flex-col items-center w-full max-w-4xl px-4 animate-fade-in-up">
 
-              <div className="mb-8 transform scale-125 cursor-pointer hover:brightness-125 active:scale-110 transition-all group relative" onClick={() => setShowSettings(true)}>
-                <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse" />
-                <NeuroFace status="dead" persona={persona} />
-                <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 text-red-400 text-[10px] px-3 py-1 skew-x-[-12deg] border border-red-500/30 font-bold opacity-0 group-hover:opacity-100 transition-opacity tracking-widest whitespace-nowrap">
-                  SYSTEM CONFIG // 設定
+              {/* 死亡標題與頭像橫向排列 */}
+              <div className="relative flex justify-center items-center mb-8" style={{ minHeight: '180px' }}>
+                <div>
+                  <h1 className="text-7xl md:text-9xl font-black italic tracking-tighter text-red-500 drop-shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse mb-2 glitch-text" data-text="MISSION FAILED">
+                    MISSION FAILED
+                  </h1>
+                  <h2 className="text-xl md:text-2xl font-bold tracking-[0.8em] text-red-200/60 mt-2 uppercase">
+                    {deathDetails.reasonDisplay}
+                  </h2>
+                </div>
+                {/* 頭像絕對定位在標題右側，重疊貼近 */}
+                <div
+                  className="absolute top-1/2 left-full cursor-pointer hover:brightness-125 active:scale-110 transition-all group"
+                  style={{
+                    transform: 'translate(-180px, -50%) scale(3)',
+                    zIndex: 10
+                  }}
+                  onClick={() => setShowSettings(true)}
+                >
+                  <div className="absolute inset-0 bg-red-500/20 blur-xl rounded-full animate-pulse" />
+                  <NeuroFace status="dead" persona={persona} />
+                  <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 bg-slate-900/80 text-red-400 text-[10px] px-3 py-1 skew-x-[-12deg] border border-red-500/30 font-bold opacity-0 group-hover:opacity-100 transition-opacity tracking-widest whitespace-nowrap">
+                    SYSTEM CONFIG // 設定
+                  </div>
                 </div>
               </div>
-
-              <h1 className="text-7xl md:text-9xl font-black italic tracking-tighter text-red-500 drop-shadow-[0_0_25px_rgba(239,68,68,0.6)] animate-pulse mb-2 glitch-text" data-text="MISSION FAILED">
-                MISSION FAILED
-              </h1>
-              <h2 className="text-xl md:text-2xl font-bold tracking-[0.8em] text-red-200/60 mb-8 uppercase">
-                {deathDetails.reasonDisplay}
-              </h2>
 
               {/* Stats Panel */}
               <div className="flex flex-col md:flex-row gap-6 w-full max-w-2xl justify-center mb-10">
@@ -2424,15 +2441,6 @@ const App: React.FC = () => {
         playerName={playerName}
         onUpdateName={handleUpdateName}
         roomParticipants={roomParticipants}
-        persona={persona}
-        onUpdatePersona={(p) => {
-          setPersona(p);
-          if (multiplayerMode && mpManagerRef.current && !isMultiplayerHost) {
-            mpManagerRef.current.broadcast({ type: 'PLAYER_READY' });
-          } else if (isMultiplayerHost) {
-            setPlayerReadyStates(prev => new Map(prev).set(mpManagerRef.current?.myId || 'HOST', true));
-          }
-        }}
         isMobileMode={isMobileMode}
         onToggleMobileMode={handleToggleMobileMode}
         onForceRestart={handleForceRestart}
@@ -2521,9 +2529,10 @@ const App: React.FC = () => {
             onSelect={(p) => {
               setPersona(p);
               setShowCharacterSelect(false);
-              handleStart();
+              handleStart(pendingChallenge || undefined);
+              setPendingChallenge(null);
             }}
-            onClose={() => setShowCharacterSelect(false)}
+            onClose={() => { setShowCharacterSelect(false); setPendingChallenge(null); }}
             isMobile={isMobileMode}
           />
         )
@@ -2559,7 +2568,7 @@ const App: React.FC = () => {
 
       {/* Version Number */}
       <div className="absolute bottom-2 left-2 text-[8px] text-white/20 font-mono pointer-events-none uppercase tracking-tighter">
-        Alpha
+        Alpha 2.0 (TC)
       </div>
     </div >
   );

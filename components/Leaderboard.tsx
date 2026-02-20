@@ -87,7 +87,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
                                     </td>
                                     <td className="py-3 px-4">
                                         <div className="flex items-center gap-2">
-                                            <span className={`w-2 h-2 rounded-full ${entry.persona === 'NEURO' ? 'bg-pink-500' : 'bg-red-600'}`} title={entry.persona} />
+                                            <span className={`w-2 h-2 rounded-full ${entry.persona === 'NEURO' ? 'bg-pink-400' : (entry.persona === 'VEDAL' ? 'bg-green-500' : (entry.persona === 'AIRIS' ? 'bg-slate-400' : 'bg-red-600'))}`} title={entry.persona} />
                                             {entry.name}
                                         </div>
                                     </td>

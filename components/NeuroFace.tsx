@@ -13,6 +13,9 @@ import evilPanic from '../assets/face/evil_panic.gif';
 import evilWin from '../assets/face/evil_win.png';
 import evilDead from '../assets/face/evil_dead.jpg';
 
+// Vedal Image
+import vedalPortrait from '../assets/conceptart/Vedal.webp';
+
 interface NeuroFaceProps {
   status: 'idle' | 'panic' | 'dead' | 'win' | 'fast';
   persona: Persona;
@@ -38,6 +41,8 @@ export const NeuroFace: React.FC<NeuroFaceProps> = ({ status, persona, className
         case 'fast': return evilWin; // 高速時顯示興奮/臉紅
         default: return evilIdle;
       }
+    } else if (persona === Persona.VEDAL) {
+      return vedalPortrait; // 目前 Vedal 只有一張圖
     } else {
       switch (status) {
         case 'panic': return neuroPanic;
@@ -50,7 +55,8 @@ export const NeuroFace: React.FC<NeuroFaceProps> = ({ status, persona, className
   };
 
   const avatarImg = getAvatarSrc();
-  const borderColor = isEvil ? 'border-red-600' : 'border-pink-400';
+  const isVedal = persona === Persona.VEDAL;
+  const borderColor = isEvil ? 'border-red-600' : (isVedal ? 'border-green-600' : 'border-pink-400');
 
   // 根據狀態選擇動畫
   const getAnimationClass = () => {
@@ -73,7 +79,7 @@ export const NeuroFace: React.FC<NeuroFaceProps> = ({ status, persona, className
   return (
     <div className={`relative w-24 h-24 border-4 ${borderColor} rounded-xl overflow-hidden shadow-lg transition-all duration-300 bg-slate-900 ${getAnimationClass()} ${className}`}>
       {/* 背景層 (Z-0) */}
-      <div className={`absolute inset-0 z-0 ${isEvil ? 'bg-red-950' : 'bg-pink-100'}`} />
+      <div className={`absolute inset-0 z-0 ${isEvil ? 'bg-red-950' : (isVedal ? 'bg-green-950' : 'bg-pink-100')}`} />
 
       {/* 頭像圖片層 (Z-10) */}
       {!loadError ? (
@@ -91,8 +97,8 @@ export const NeuroFace: React.FC<NeuroFaceProps> = ({ status, persona, className
       )}
 
       {/* 角色標籤 (Z-30) */}
-      <div className={`absolute bottom-1 right-1 px-1 rounded text-[10px] font-bold z-30 ${isEvil ? 'bg-red-600 text-white' : 'bg-pink-400 text-white'}`}>
-        {isEvil ? 'EVIL' : 'NEURO'}
+      <div className={`absolute bottom-1 right-1 px-1 rounded text-[10px] font-bold z-30 ${isEvil ? 'bg-red-600 text-white' : (isVedal ? 'bg-green-600 text-white' : 'bg-pink-400 text-white')}`}>
+        {isVedal ? 'VEDAL' : (isEvil ? 'EVIL' : 'NEURO')}
       </div>
     </div>
   );

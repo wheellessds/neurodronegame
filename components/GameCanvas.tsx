@@ -74,6 +74,62 @@ interface GameCanvasProps {
     mpUpdateRate?: 'low' | 'med' | 'high';
 }
 
+const getPersonaColor = (p: Persona) => {
+    if (p === Persona.EVIL) return '#ef4444';
+    if (p === Persona.VEDAL) return '#16a34a';
+    if (p === Persona.AIRIS) return '#64748b'; // Slate Gray
+    return '#22d3ee';
+};
+
+const getPersonaBodyColor = (p: Persona) => {
+    if (p === Persona.EVIL) return '#ef4444';
+    if (p === Persona.VEDAL) return '#16a34a';
+    if (p === Persona.AIRIS) return '#94a3b8'; // Slate 400
+    return '#f472b6'; // Matching debris color (Pink 400) for Neuro
+};
+
+const getPersonaColorLight = (p: Persona) => {
+    if (p === Persona.EVIL) return '#fca5a5';
+    if (p === Persona.VEDAL) return '#bbf7d0';
+    if (p === Persona.AIRIS) return '#cbd5e1'; // Slate 300
+    return '#a5f3fc';
+};
+
+const getPersonaColorRGB = (p: Persona) => {
+    if (p === Persona.EVIL) return '239, 68, 68';
+    if (p === Persona.VEDAL) return '22, 163, 74';
+    if (p === Persona.AIRIS) return '100, 116, 139';
+    return '34, 211, 238';
+};
+
+// [NEW] Helper for Airis Osu Circle terrain avoidance
+const getSafePosition = (x: number, y: number, minY: number, maxY: number, radius: number, walls: Rect[]) => {
+    const isBlocked = (px: number, py: number) => {
+        for (const w of walls) {
+            const cx = Math.max(w.x, Math.min(px, w.x + w.w));
+            const cy = Math.max(w.y, Math.min(py, w.y + w.h));
+            if (((px - cx) ** 2 + (py - cy) ** 2) < (radius * radius)) return true;
+        }
+        return false;
+    };
+
+    if (!isBlocked(x, y)) return y;
+
+    // Search for safe height
+    for (let offset = 40; offset < 400; offset += 40) {
+        if (y + offset < maxY && !isBlocked(x, y + offset)) return y + offset;
+        if (y - offset > minY && !isBlocked(x, y - offset)) return y - offset;
+    }
+    return y;
+};
+
+const getPersonaColorArray = (p: Persona) => {
+    if (p === Persona.EVIL) return [239, 68, 68];
+    if (p === Persona.VEDAL) return [22, 163, 74];
+    if (p === Persona.AIRIS) return [100, 116, 139];
+    return [6, 182, 212];
+};
+
 export const GameCanvas: React.FC<GameCanvasProps> = ({
     gameState,
     setGameState,
@@ -137,8 +193,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         radius: 15,
         fuel: 100,
         maxFuel: 100,
-        health: 100,
-        maxHealth: 100,
+        health: persona === Persona.VEDAL ? Constants.VEDAL_MAX_HEALTH + (upgrades.hullLevel * 40) : 100 + (upgrades.hullLevel * 20),
+        maxHealth: persona === Persona.VEDAL ? Constants.VEDAL_MAX_HEALTH + (upgrades.hullLevel * 40) : 100 + (upgrades.hullLevel * 20),
         thrustPower: 0,
         invincibleTimer: 0,
         isGodMode: false
@@ -163,6 +219,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         tutels: [],
         gasZones: [],
         urgentOrders: [],
+        osuCircles: [],
         train: { x: -500, y: 500, speed: 2, w: 120, h: 40 }
     });
 
@@ -191,6 +248,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const hasLaunchedRef = useRef(false);
     const lastDamageSource = useRef<string>('WALL');
     const fuelEmptyFramesRef = useRef(0);
+
+    // [AIRIS] Spawning Cooldown to prevent waterfall effect
+    const lastOsuSpawnTimeRef = useRef<number>(0);
+
+
 
     const cameraRef = useRef<Vector2>({ x: 0, y: 0 });
 
@@ -225,6 +287,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // --- DRONE OVERLAY REFS & STATE ---
     const droneOverlayRef = useRef<HTMLDivElement>(null);
+    const urgentOrderImgRef = useRef<HTMLImageElement | null>(null);
+    const osuCircleImgRef = useRef<HTMLImageElement | null>(null);
     const remoteDroneOverlaysRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
     // Visual State for React Render (Optimization: only update when changed)
@@ -244,6 +308,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const tutels = levelRef.current.tutels;
         const gasZones = levelRef.current.gasZones;
         const urgentOrders = levelRef.current.urgentOrders;
+        const osuCircles = levelRef.current.osuCircles;
+
+        // Osu Circles are now triggered by damage for Airis, not spawned in chunks.
 
         // Difficulty scaler: increases every 5000 units
         const difficultyFactor = Math.min(5, 1 + Math.floor(startX / 5000));
@@ -387,6 +454,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         return startX + Constants.CHUNK_SIZE;
     }, []);
 
+    // Asset Loading
+    useEffect(() => {
+        const urgentOrderImg = new Image();
+        urgentOrderImg.src = '/assets/urgent_order.png';
+        urgentOrderImgRef.current = urgentOrderImg;
+
+        const osuCircleImg = new Image();
+        osuCircleImg.src = '/assets/osu/sliderstartcircle.png';
+        osuCircleImgRef.current = osuCircleImg;
+    }, []);
+
     const resetDroneState = useCallback(() => {
         const wasGodMode = droneRef.current.isGodMode;
 
@@ -415,8 +493,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             radius: 15,
             fuel: 500 + (upgrades.tankLevel * 50),
             maxFuel: 500 + (upgrades.tankLevel * 50),
-            health: 100 + (upgrades.hullLevel * 20),
-            maxHealth: 100 + (upgrades.hullLevel * 20),
+            health: persona === Persona.VEDAL ? Constants.VEDAL_MAX_HEALTH + (upgrades.hullLevel * 40) : 100 + (upgrades.hullLevel * 20),
+            maxHealth: persona === Persona.VEDAL ? Constants.VEDAL_MAX_HEALTH + (upgrades.hullLevel * 40) : 100 + (upgrades.hullLevel * 20),
             thrustPower: 0,
             invincibleTimer: 0,
             isGodMode: wasGodMode
@@ -456,6 +534,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // [MULTIPLAYER FIX] Remove grace period so train kills immediately
         trainGraceTimerRef.current = 0;
 
+        // [AIRIS FIX] Clear Osu Circles on respawn
+        if (levelRef.current) {
+            levelRef.current.osuCircles = [];
+        }
+
     }, [upgrades, lastCheckpoint, setUrgentOrderProgress]);
 
 
@@ -481,7 +564,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const pieces: Debris[] = [];
 
         // Cargo color: Amber/Brown, Drone color: Persona-based
-        const baseColor = isCargoDeath ? '#d97706' : (persona === Persona.EVIL ? '#ef4444' : '#f472b6');
+        const baseColor = isCargoDeath ? '#d97706' : getPersonaBodyColor(persona);
 
         if (!isCargoDeath) {
             droneRef.current.health = 0; // Ensure health is 0 to stop other triggers
@@ -537,6 +620,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             tutels: [],
             gasZones: [],
             urgentOrders: [],
+            osuCircles: [],
+            harpoons: [],
             train: savedTrain || { x: lastCheckpoint.x - 800, y: lastCheckpoint.y, speed: 2.1, w: 120, h: 40 }
         };
         lastBiomeRef.current = -1; // Reset biome tracking
@@ -763,6 +848,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                             tutels: [],
                             gasZones: [],
                             urgentOrders: [],
+                            osuCircles: [],
                             train: savedTrain || { x: -800, y: 0, speed: 2.1, w: 120, h: 40 }
                         };
                         lastBiomeRef.current = -1;
@@ -1283,7 +1369,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         // Smooth follow instead of instant snap/overlap
                         // Using a reasonable multiplier that doesn't oscillate
                         const targetAngVel = (angleDiff * 0.3) / Math.max(0.1, dt);
-                        // allow physical forces (like collisions) to influence angular velocity briefly
                         drone.angularVel += (targetAngVel - drone.angularVel) * 0.2;
 
                         effectiveInput = {
@@ -1331,9 +1416,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                         effectiveInput = inputQueueRef.current.length > lagFrames ? inputQueueRef.current.shift()! : rawInput;
                     }
 
-                    const thrustMult = (persona === Persona.EVIL ? Constants.EVIL_THRUST : Constants.NEURO_THRUST) * (1 + upgrades.engineLevel * 0.1);
+                    const thrustMult = (persona === Persona.VEDAL ? Constants.VEDAL_THRUST : (persona === Persona.EVIL ? Constants.EVIL_THRUST : (persona === Persona.AIRIS ? Constants.AIRIS_THRUST : Constants.NEURO_THRUST))) * (1 + upgrades.engineLevel * 0.1);
 
-                    let fuelCost = (persona === Persona.EVIL ? Constants.EVIL_FUEL_CONSUMPTION : Constants.NEURO_FUEL_CONSUMPTION) * (difficulty === 'EASY' ? 0.8 : 1.0);
+                    let fuelCost = (persona === Persona.VEDAL ? Constants.VEDAL_FUEL_CONSUMPTION : (persona === Persona.EVIL ? Constants.EVIL_FUEL_CONSUMPTION : (persona === Persona.AIRIS ? Constants.AIRIS_FUEL_CONSUMPTION : Constants.NEURO_FUEL_CONSUMPTION))) * (difficulty === 'EASY' ? 0.8 : 1.0);
                     if (isEcoMode) fuelCost *= 0.8;
 
                     let activeGravity = Constants.GRAVITY;
@@ -1355,15 +1440,86 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 zone.gravityScale = 1;
                                 activeGravity = Constants.GRAVITY;
                             }
+
                         } else {
                             zone.timer = 0;
                         }
                     });
 
+
                     // Tutel Logic
                     let tutelWeight = 0;
                     let tutelDrag = 0;
                     const isInvincible = drone.invincibleTimer > 0 || drone.isGodMode;
+
+                    // Osu Circles Logic (Airis Recovery)
+                    if (levelRef.current.osuCircles) {
+                        // [OPTIMIZATION] Update life and filter collected/expired circles
+                        levelRef.current.osuCircles.forEach(c => {
+                            if (!c.collected) c.life -= dt / 60;
+                        });
+
+                        levelRef.current.osuCircles = levelRef.current.osuCircles.filter(c =>
+                            !c.collected && c.life > 0 && (c.x > cameraRef.current.x - 200)
+                        );
+
+                        levelRef.current.osuCircles.forEach(circle => {
+                            if (circle.collected) return;
+
+                            const dxDrone = drone.pos.x - circle.x;
+                            const dyDrone = drone.pos.y - circle.y;
+                            const distDrone = Math.sqrt(dxDrone * dxDrone + dyDrone * dyDrone);
+
+                            const dxCargo = cargo.pos.x - circle.x;
+                            const dyCargo = cargo.pos.y - circle.y;
+                            const distCargo = Math.sqrt(dxCargo * dxCargo + dyCargo * dyCargo);
+
+                            if (distDrone < drone.radius + circle.radius || distCargo < cargo.radius + circle.radius) {
+                                circle.collected = true;
+
+                                // Scaled Healing: 10 + number * 2
+                                const healAmount = 10 + (circle.number || 1) * 2;
+                                droneRef.current.health = Math.min(droneRef.current.maxHealth, droneRef.current.health + healAmount);
+                                cargoRef.current.health = Math.min(cargoRef.current.maxHealth, cargoRef.current.health + healAmount);
+
+                                // [NEW] Chain Logic: Spawn next circle to the right and within viewport
+                                if (levelRef.current.osuCircles.length < 50) { // Safety limit
+                                    const viewportWidth = ctx.canvas.width;
+                                    const worldLeft = -cameraRef.current.x;
+                                    const leftBound = worldLeft + 60;
+                                    const rightBound = worldLeft + viewportWidth - 60;
+
+                                    // Spawn 250~500px to the right of the collection point
+                                    let nextX = circle.x + 250 + Math.random() * 250;
+                                    // Clamp to viewport
+                                    nextX = Math.max(leftBound, Math.min(rightBound, nextX));
+
+                                    // [NEW] Terrain avoidance
+                                    let nextY = 150 + Math.random() * (ctx.canvas.height - 300);
+                                    nextY = getSafePosition(nextX, nextY, 150, ctx.canvas.height - 150, 45, levelRef.current.walls);
+
+                                    levelRef.current.osuCircles.push({
+                                        x: nextX,
+                                        y: nextY,
+                                        radius: 35,
+                                        collected: false,
+                                        number: (circle.number || 1) + 1,
+                                        life: 2.5
+                                    });
+                                }
+
+                                // Visual feedback
+                                damageTextsRef.current.push({
+                                    x: circle.x,
+                                    y: circle.y,
+                                    text: `+${healAmount} HP`,
+                                    life: 60
+                                });
+
+                                SoundManager.play('coin'); // Reuse coin sound for feedback
+                            }
+                        });
+                    }
 
                     levelData.tutels.forEach(tutel => {
                         if (tutel.state === 'yeeted') {
@@ -1553,6 +1709,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                         life: 1.0,
                                         size: 4 + Math.random() * 8,
                                         color: Math.random() > 0.4 ? '#ef4444' : '#111827'
+                                    });
+                                } else if (persona === Persona.VEDAL) {
+                                    particlesRef.current.push({
+                                        x: drone.pos.x,
+                                        y: drone.pos.y,
+                                        vx: -drone.vel.x * 0.25 + (Math.random() - 0.5) * 4,
+                                        vy: -drone.vel.y * 0.25 + (Math.random() - 0.5) * 4,
+                                        life: 1.2,
+                                        size: 12 + Math.random() * 8,
+                                        color: '#16a34a',
+                                        text: Math.random() > 0.5 ? '<' : '>'
                                     });
                                 }
                             }
@@ -1749,6 +1916,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     }
                 });
 
+
                 const checkCollision = (entity: Drone | Cargo, isDrone: boolean) => {
                     const isInvincible = drone.invincibleTimer > 0 || drone.isGodMode;
                     let collided = false;
@@ -1822,8 +1990,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                     lastDamageSource.current = 'LASER';
                                     setFaceStatus('panic');
                                     if (Math.random() < 0.2) SoundManager.play('damage');
+
+                                    // [AIRIS] Spawn Osu Circle on hazard damage (Right-side + Viewport + No Terrain + Cooldown)
+                                    const now = performance.now();
+                                    if (persona === Persona.AIRIS && levelRef.current.osuCircles && (now - lastOsuSpawnTimeRef.current > 500)) {
+                                        lastOsuSpawnTimeRef.current = now;
+                                        const viewportWidth = ctx.canvas.width;
+                                        const worldLeft = -cameraRef.current.x;
+                                        const leftBound = worldLeft + 60;
+                                        const rightBound = worldLeft + viewportWidth - 60;
+                                        let spawnX = drone.pos.x + 250 + Math.random() * 250;
+                                        spawnX = Math.max(leftBound, Math.min(rightBound, spawnX));
+
+                                        let spawnY = 150 + Math.random() * (ctx.canvas.height - 300);
+                                        spawnY = getSafePosition(spawnX, spawnY, 150, ctx.canvas.height - 150, 45, levelRef.current.walls);
+
+                                        levelRef.current.osuCircles.push({
+                                            x: spawnX,
+                                            y: spawnY,
+                                            radius: 35,
+                                            collected: false,
+                                            number: 1,
+                                            life: 2.5
+                                        });
+                                    }
                                 } else if (!isDrone) {
                                     cargo.health -= 2;
+                                    // [AIRIS] Spawn Osu Circle on hazard cargo damage (Right-side + Viewport + No Terrain + Cooldown)
+                                    const now = performance.now();
+                                    if (persona === Persona.AIRIS && levelRef.current.osuCircles && (now - lastOsuSpawnTimeRef.current > 500)) {
+                                        lastOsuSpawnTimeRef.current = now;
+                                        const viewportWidth = ctx.canvas.width;
+                                        const worldLeft = -cameraRef.current.x;
+                                        const leftBound = worldLeft + 60;
+                                        const rightBound = worldLeft + viewportWidth - 60;
+                                        let spawnX = cargo.pos.x + 250 + Math.random() * 250;
+                                        spawnX = Math.max(leftBound, Math.min(rightBound, spawnX));
+
+                                        let spawnY = 150 + Math.random() * (ctx.canvas.height - 300);
+                                        spawnY = getSafePosition(spawnX, spawnY, 150, ctx.canvas.height - 150, 45, levelRef.current.walls);
+
+                                        levelRef.current.osuCircles.push({
+                                            x: spawnX,
+                                            y: spawnY,
+                                            radius: 35,
+                                            collected: false,
+                                            number: 1,
+                                            life: 2.5
+                                        });
+                                    }
                                 }
                             }
 
@@ -1926,6 +2141,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                 if (impactSpeed > Constants.DAMAGE_THRESHOLD) {
                                     let damage = Math.floor(impactSpeed * 5);
                                     if (isArmored) damage = Math.floor(damage * 0.7);
+                                    if (persona === Persona.VEDAL && isDrone) damage = Math.floor(damage * (1 - Constants.VEDAL_DAMAGE_RESISTANCE));
 
                                     if (isDrone) {
                                         if (!isInvincible) {
@@ -1934,10 +2150,58 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                                             setFaceStatus('panic');
                                             SoundManager.play('damage');
                                             damageFlashRef.current = 1.0;
+
+                                            // [NEW] Airis Mechanic: Spawn Osu Circle with Cooldown and greater distance
+                                            const now = performance.now();
+                                            if (persona === Persona.AIRIS && levelRef.current.osuCircles && (now - lastOsuSpawnTimeRef.current > 500)) {
+                                                lastOsuSpawnTimeRef.current = now;
+                                                const viewportWidth = ctx.canvas.width;
+                                                const worldLeft = -cameraRef.current.x;
+                                                const leftBound = worldLeft + 60;
+                                                const rightBound = worldLeft + viewportWidth - 60;
+                                                let spawnX = drone.pos.x + 250 + Math.random() * 250;
+                                                spawnX = Math.max(leftBound, Math.min(rightBound, spawnX));
+
+                                                let spawnY = 150 + Math.random() * (ctx.canvas.height - 300);
+                                                spawnY = getSafePosition(spawnX, spawnY, 150, ctx.canvas.height - 150, 45, levelRef.current.walls);
+
+                                                levelRef.current.osuCircles.push({
+                                                    x: spawnX,
+                                                    y: spawnY,
+                                                    radius: 35,
+                                                    collected: false,
+                                                    number: 1,
+                                                    life: 2.5
+                                                });
+                                            }
                                         }
                                     } else {
                                         cargo.health -= damage;
                                         damageFlashRef.current = 0.5;
+
+                                        // [NEW] Airis Mechanic: Spawn Osu Circle with Cooldown and greater distance (Cargo)
+                                        const now = performance.now();
+                                        if (persona === Persona.AIRIS && levelRef.current.osuCircles && (now - lastOsuSpawnTimeRef.current > 500)) {
+                                            lastOsuSpawnTimeRef.current = now;
+                                            const viewportWidth = ctx.canvas.width;
+                                            const worldLeft = -cameraRef.current.x;
+                                            const leftBound = worldLeft + 60;
+                                            const rightBound = worldLeft + viewportWidth - 60;
+                                            let spawnX = cargo.pos.x + 250 + Math.random() * 250;
+                                            spawnX = Math.max(leftBound, Math.min(rightBound, spawnX));
+
+                                            let spawnY = 150 + Math.random() * (ctx.canvas.height - 300);
+                                            spawnY = getSafePosition(spawnX, spawnY, 150, ctx.canvas.height - 150, 45, levelRef.current.walls);
+
+                                            levelRef.current.osuCircles.push({
+                                                x: spawnX,
+                                                y: spawnY,
+                                                radius: 35,
+                                                collected: false,
+                                                number: 1,
+                                                life: 2.5
+                                            });
+                                        }
                                     }
                                 }
                             }
@@ -2056,7 +2320,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
 
             // --- RENDERING ---
-            if (!ctx.canvas) return;
+            if (!ctx || !ctx.canvas) return;
             const width = ctx.canvas.width;
             const height = ctx.canvas.height;
 
@@ -2218,7 +2482,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     ctx.lineJoin = 'round';
 
                     const gradient = ctx.createLinearGradient(drone.pos.x, drone.pos.y, trailRef.current[trailRef.current.length - 1].x, trailRef.current[trailRef.current.length - 1].y);
-                    const color = persona === Persona.EVIL ? '#ef4444' : '#22d3ee';
+                    const color = getPersonaColor(persona);
                     gradient.addColorStop(0, color);
                     gradient.addColorStop(1, 'transparent');
 
@@ -2245,7 +2509,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     if (isHighSpeedRef.current) {
                         ctx.save();
                         ctx.globalAlpha = alpha * 0.35;
-                        const glowColor = persona === Persona.EVIL ? '#ef4444' : '#22d3ee';
+                        const glowColor = getPersonaColor(persona);
                         const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, glowSize * 1.8);
                         grd.addColorStop(0, glowColor);
                         grd.addColorStop(1, 'transparent');
@@ -2277,16 +2541,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     ctx.globalAlpha = alpha;
                     ctx.translate(p.x, p.y);
                     ctx.rotate(p.angle);
-                    ctx.fillStyle = persona === Persona.EVIL ? '#fca5a5' : '#a5f3fc';
+                    ctx.fillStyle = getPersonaColorLight(persona);
                     ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.fill();
                     ctx.restore();
                 });
             }
 
+
             // --- RENDER ROTOR GLOW TRAIL ---
             const rTrail = rotorGlowTrailRef.current;
             if (rTrail.left.length > 1 || rTrail.right.length > 1) {
-                const glowColor = persona === Persona.EVIL ? '239, 68, 68' : '6, 182, 212';
+                const glowColor = getPersonaColorRGB(persona);
                 [rTrail.left, rTrail.right].forEach(arr => {
                     if (arr.length < 2) return;
 
@@ -2364,7 +2629,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             // --- RENDER SONIC BOOMS ---
             sonicBoomsRef.current.forEach(sb => {
                 ctx.save();
-                const boomColor = persona === Persona.EVIL ? [239, 68, 68] : [6, 182, 212];
+                const boomColor = getPersonaColorArray(persona);
                 // Outer glow
                 ctx.beginPath();
                 ctx.strokeStyle = `rgba(${boomColor[0]}, ${boomColor[1]}, ${boomColor[2]}, ${sb.life * 0.3})`;
@@ -2467,6 +2732,57 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 });
             }
 
+            // Draw Osu Circles (Hand-drawn with life-indicator ring)
+            if (levelRef.current.osuCircles) {
+                levelRef.current.osuCircles.forEach(circle => {
+                    if (circle.collected || circle.life <= 0) return;
+
+                    ctx.save();
+                    ctx.translate(circle.x, circle.y);
+
+                    // 1. Draw outer "Approach Circle" (shrinks from 2x radius to radius as life goes 2.5 -> 0)
+                    const lifeRatio = Math.max(0, circle.life / 2.5);
+                    const approachRadius = circle.radius + (circle.radius * lifeRatio);
+
+                    ctx.beginPath();
+                    ctx.arc(0, 0, approachRadius, 0, Math.PI * 2);
+                    ctx.strokeStyle = `rgba(255, 105, 180, ${0.3 + (1 - lifeRatio) * 0.5})`; // Pinkish
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    // 2. Draw Main Circle
+                    ctx.beginPath();
+                    ctx.arc(0, 0, circle.radius, 0, Math.PI * 2);
+
+                    // Glow effect
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = 'rgba(255, 105, 180, 0.8)';
+
+                    // Fill (Gradient)
+                    const radGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, circle.radius);
+                    radGrad.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                    radGrad.addColorStop(1, 'rgba(255, 182, 193, 0.4)'); // Light pink
+                    ctx.fillStyle = radGrad;
+                    ctx.fill();
+
+                    // Border
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+
+                    // 3. Render Number in center
+                    ctx.shadowBlur = 4;
+                    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                    ctx.fillStyle = '#fff'; // White
+                    ctx.font = 'bold 28px Arial, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(circle.number.toString(), 0, 0);
+
+                    ctx.restore();
+                });
+            }
+
             // --- RENDER LOCAL PLAYER DEATH MARKER ---
             if (drone.health <= 0 && !isCargoDeath) {
                 const size = 10;
@@ -2546,6 +2862,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
             }
 
+
             ctx.restore(); // World Camera Restore
 
             // [DEBUG] Tutorial On-Screen Info (Rendered LAST)
@@ -2592,7 +2909,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
             // --- HIGH SPEED LIGHTING OVERLAY ---
             if (isHighSpeedRef.current) {
-                const edgeColor = persona === Persona.EVIL ? [239, 68, 68] : [6, 182, 212]; // red vs cyan
+                const edgeColor = getPersonaColorArray(persona); // red vs cyan
                 const pulseAlpha = 0.12 + Math.sin(time * 0.003) * 0.05; // subtle pulse
 
                 // 1. Edge vignette glow
@@ -2715,7 +3032,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 if (multiplayer?.isActive) {
                     multiplayer.remotePlayers.forEach(p => {
                         const rdp = mapWorldToMM(p.pos.x, p.pos.y);
-                        ctx.fillStyle = p.persona === Persona.EVIL ? '#ef4444' : '#f472b6';
+                        ctx.fillStyle = getPersonaColor(p.persona);
                         ctx.beginPath(); ctx.arc(rdp.x, rdp.y, 2, 0, Math.PI * 2); ctx.fill();
                     });
                 }
@@ -2737,7 +3054,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 const scale = 1 + (isThrusting ? Math.sin(Date.now() / 50) * 0.1 : 0);
                 ctx.scale(scale, scale);
 
-                const color = persona === Persona.EVIL ? '#ef4444' : '#06b6d4';
+                const color = getPersonaColor(persona);
                 ctx.strokeStyle = color;
                 ctx.lineWidth = 2;
 
@@ -2758,14 +3075,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 ctx.stroke();
 
                 // Small dot
-                ctx.fillStyle = color;
-                ctx.beginPath();
-                ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
-                ctx.fill();
-
                 ctx.restore();
             }
-            // -------------------------
+
 
             // --- VERSION STRING ---
             ctx.save();
@@ -2869,7 +3181,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         requestRef.current = requestAnimationFrame(loop);
         return () => cancelAnimationFrame(requestRef.current!);
-    }, [gameState, persona, upgrades, onCrash, setFaceStatus, setVedalMessage, lastCheckpoint, setLastCheckpoint, difficulty, equippedItem, isMobileMode, respawnToken, onGrantRandomUpgrade, setUrgentOrderProgress, isLayoutEditing]);
+    }, [gameState, persona, upgrades, onCrash, setFaceStatus, setVedalMessage, lastCheckpoint, setLastCheckpoint, difficulty, equippedItem, isMobileMode, respawnToken, onGrantRandomUpgrade, setUrgentOrderProgress, isLayoutEditing, isSpectating, spectatorTargetId, onUpdateTrajectory]);
 
     useEffect(() => {
         const handleResize = () => {
@@ -2895,7 +3207,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     style={{ willChange: 'transform' }}
                 >
                     <DroneView
-                        color={persona === Persona.EVIL ? '#ef4444' : '#f472b6'}
+                        color={getPersonaBodyColor(persona)}
                         persona={persona}
                         isMobile={isMobileMode}
                         isInvincible={droneVisualState.isInvincible}
@@ -2920,7 +3232,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     style={{ willChange: 'transform' }}
                 >
                     <DroneView
-                        color={p.persona === Persona.EVIL ? '#ef4444' : '#f472b6'}
+                        color={getPersonaBodyColor(p.persona)}
                         persona={p.persona}
                         isMobile={isMobileMode}
                         health={p.health}

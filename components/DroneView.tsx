@@ -140,18 +140,28 @@ export const DroneView: React.FC<DroneViewProps> = ({
                                     <div className="absolute text-[14px] text-cyan-300 font-mono animate-float-code" style={{ top: '50%', left: '15%', animationDelay: '0.4s' }}>1</div>
                                     <div className="absolute text-[10px] text-white font-mono animate-float-code" style={{ top: '70%', left: '35%', animationDelay: '0.8s' }}>0</div>
                                 </>
-                            ) : (
+                            ) : persona === 'EVIL' ? (
                                 <>
                                     <div className="absolute w-2.5 h-2.5 bg-red-600 rounded-full blur-[1px] animate-float-ember" style={{ top: '30%', left: '25%' }} />
                                     <div className="absolute w-2 h-2 bg-orange-500 rounded-full blur-[0.5px] animate-float-ember" style={{ top: '50%', left: '15%', animationDelay: '0.3s' }} />
                                     <div className="absolute w-1.5 h-1.5 bg-yellow-400 rounded-full blur-[0.5px] animate-float-ember" style={{ top: '70%', left: '35%', animationDelay: '0.6s' }} />
                                 </>
+                            ) : persona === 'VEDAL' ? (
+                                <>
+                                    <div className="absolute text-[12px] text-green-400 font-mono animate-float-code" style={{ top: '30%', left: '25%' }}>+</div>
+                                    <div className="absolute text-[14px] text-green-300 font-mono animate-float-code" style={{ top: '50%', left: '15%', animationDelay: '0.4s' }}>-</div>
+                                    <div className="absolute text-[10px] text-white font-mono animate-float-code" style={{ top: '70%', left: '35%', animationDelay: '0.8s' }}>*</div>
+                                </>
+                            ) : persona === 'AIRIS' ? (
+                                <></>
+                            ) : (
+                                <></>
                             )}
                         </div>
 
                         {/* RGB Ghosting Layers - More subtle */}
                         <div className="absolute inset-0 rounded-full bg-red-500/15 blur-sm -translate-x-3 translate-y-3 scale-95 mix-blend-screen opacity-50 animate-ghost-pulse" />
-                        <div className="absolute inset-0 rounded-full bg-cyan-400/15 blur-sm -translate-x-6 translate-y-6 scale-90 mix-blend-screen opacity-30 animate-ghost-pulse" style={{ animationDelay: '-0.2s' }} />
+                        <div className="absolute inset-0 rounded-full bg-pink-400/15 blur-sm -translate-x-6 translate-y-6 scale-90 mix-blend-screen opacity-30 animate-ghost-pulse" style={{ animationDelay: '-0.2s' }} />
                         <div className="absolute inset-0 rounded-full opacity-10 bg-white blur-lg animate-pulse scale-110" />
                     </div>
                 )}
@@ -168,16 +178,16 @@ export const DroneView: React.FC<DroneViewProps> = ({
                             left: '8%',
                             width: isBursting ? '8px' : '5px',
                             height: isBursting ? '8px' : '5px',
-                            backgroundColor: isEvil ? '#ef4444' : '#22d3ee',
-                            boxShadow: `0 0 ${isBursting ? '12px 4px' : '6px 2px'} ${isEvil ? '#ef4444' : '#22d3ee'}`,
+                            backgroundColor: isEvil ? '#ef4444' : (persona === Persona.VEDAL ? '#16a34a' : '#22d3ee'),
+                            boxShadow: `0 0 ${isBursting ? '12px 4px' : '6px 2px'} ${isEvil ? '#ef4444' : (persona === Persona.VEDAL ? '#16a34a' : '#22d3ee')}`,
                             transition: 'all 0.3s'
                         }} />
                         <div className="absolute top-1/2 -translate-y-1/2 translate-x-1/2 rounded-full animate-pulse" style={{
                             right: '8%',
                             width: isBursting ? '8px' : '5px',
                             height: isBursting ? '8px' : '5px',
-                            backgroundColor: isEvil ? '#ef4444' : '#22d3ee',
-                            boxShadow: `0 0 ${isBursting ? '12px 4px' : '6px 2px'} ${isEvil ? '#ef4444' : '#22d3ee'}`,
+                            backgroundColor: isEvil ? '#ef4444' : (persona === Persona.VEDAL ? '#16a34a' : '#22d3ee'),
+                            boxShadow: `0 0 ${isBursting ? '12px 4px' : '6px 2px'} ${isEvil ? '#ef4444' : (persona === Persona.VEDAL ? '#16a34a' : '#22d3ee')}`,
                             transition: 'all 0.3s'
                         }} />
                     </>
@@ -191,7 +201,7 @@ export const DroneView: React.FC<DroneViewProps> = ({
                             opacity: `calc(var(--thrust-scale, ${thrustPower}) + 0.2)`, // Fade out at low thrust
                             background: isEvil
                                 ? 'linear-gradient(to bottom, transparent, #ef4444, #fee2e2)'
-                                : 'linear-gradient(to bottom, transparent, #22d3ee, #ffffff)'
+                                : (persona === Persona.VEDAL ? 'linear-gradient(to bottom, transparent, #16a34a, #bbf7d0)' : (persona === Persona.AIRIS ? 'linear-gradient(to bottom, transparent, #94a3b8, #e2e8f0)' : 'linear-gradient(to bottom, transparent, #22d3ee, #ffffff)'))
                         }}
                     >
                         {isBursting && (

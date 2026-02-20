@@ -28,8 +28,6 @@ interface SettingsOverlayProps {
     playerName?: string;
     onUpdateName?: (name: string) => void;
     roomParticipants?: { id: string, name: string }[];
-    persona: Persona;
-    onUpdatePersona: (p: Persona) => void;
     isMobileMode?: boolean;
     onToggleMobileMode?: () => void;
     onForceRestart?: () => void;
@@ -60,8 +58,6 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
     playerName,
     onUpdateName,
     roomParticipants,
-    persona,
-    onUpdatePersona,
     isMobileMode,
     onToggleMobileMode,
     onForceRestart,
@@ -187,22 +183,6 @@ export const SettingsOverlay: React.FC<SettingsOverlayProps> = ({
                                     </div>
                                 </ControlCard>
 
-                                <ControlCard label="NEURO PERSONA" sub="人格模組切換">
-                                    <div className="flex gap-2 p-1 bg-slate-950 rounded border border-slate-800">
-                                        <PersonaButton
-                                            active={persona === Persona.NEURO}
-                                            onClick={() => onUpdatePersona(Persona.NEURO)}
-                                            label="NEURO"
-                                            color="pink"
-                                        />
-                                        <PersonaButton
-                                            active={persona === Persona.EVIL}
-                                            onClick={() => onUpdatePersona(Persona.EVIL)}
-                                            label="EVIL"
-                                            color="red"
-                                        />
-                                    </div>
-                                </ControlCard>
                             </div>
 
                             <SectionHeader title="SYSTEM CONFIGURATION" subtitle="系統參數設定" />
@@ -461,17 +441,6 @@ const ToggleButton: React.FC<{ isActive: boolean; onClick: any; color?: string }
     </button>
 );
 
-const PersonaButton: React.FC<{ active: boolean; onClick: () => void; label: string; color: string }> = ({ active, onClick, label, color }) => {
-    const activeClass = color === 'pink' ? 'bg-pink-600 text-white border-pink-400 shadow-[0_0_10px_rgba(236,72,153,0.5)]' : 'bg-red-600 text-white border-red-400 shadow-[0_0_10px_rgba(220,38,38,0.5)]';
-    return (
-        <button
-            onClick={onClick}
-            className={`flex-1 py-1 text-sm font-black italic transition-all border border-transparent rounded ${active ? activeClass : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
-        >
-            {label}
-        </button>
-    );
-};
 
 const KeyBindRow: React.FC<{ label: string; sub: string; keyVal: string; isBinding: boolean; onClick: () => void }> = ({ label, sub, keyVal, isBinding, onClick }) => (
     <div

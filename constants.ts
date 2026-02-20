@@ -13,6 +13,16 @@ export const NEURO_LAG_CHANCE = 0.002;
 export const EVIL_THRUST = 0.95;
 export const EVIL_FUEL_CONSUMPTION = 1.2;
 
+// Vedal Mode Constants (Stable, Efficient, Durable)
+export const VEDAL_THRUST = 0.75;
+export const VEDAL_FUEL_CONSUMPTION = 0.45;
+export const VEDAL_MAX_HEALTH = 250;
+export const VEDAL_DAMAGE_RESISTANCE = 0.5; // 50% damage reduction
+
+// Airis Mode Constants (Baseline, Mediore)
+export const AIRIS_THRUST = 0.6;
+export const AIRIS_FUEL_CONSUMPTION = 0.65;
+
 // Rope/Cable Physics
 export const ROPE_LENGTH = 60;
 export const ROPE_K = 0.8;

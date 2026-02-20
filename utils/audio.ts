@@ -121,131 +121,132 @@ export const SoundManager = {
     const nodes = this.windNodes;
     this.windNodes = null;
     setTimeout(() => {
-      nodes.sources.forEach(s => { try { s.stop(); } catch {} });
+      nodes.sources.forEach(s => { try { s.stop(); } catch { } });
     }, 500);
   },
 
-  play(type: 'thrust' | 'coin' | 'damage' | 'crash' | 'shop' | 'win' | 'boost') {
+  play(type: 'thrust' | 'coin' | 'damage' | 'crash' | 'shop' | 'win' | 'boost' | 'charge' | 'check') {
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    
+
     // Create nodes
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
-    
+
     osc.connect(gain);
     gain.connect(this.ctx.destination);
 
     if (type === 'boost') {
-        // Sonic boom - punchy impact + rising whoosh
-        // Layer 1: Impact thud
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(80, t);
-        osc.frequency.exponentialRampToValueAtTime(30, t + 0.25);
-        gain.gain.setValueAtTime(0.7, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
-        osc.start(t);
-        osc.stop(t + 0.3);
+      // Sonic boom - punchy impact + rising whoosh
+      // Layer 1: Impact thud
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(80, t);
+      osc.frequency.exponentialRampToValueAtTime(30, t + 0.25);
+      gain.gain.setValueAtTime(0.7, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+      osc.start(t);
+      osc.stop(t + 0.3);
 
-        // Layer 2: Noise burst (use wind buffer if available)
-        if (this.windNoiseBuffer) {
-            const noiseSrc = this.ctx.createBufferSource();
-            noiseSrc.buffer = this.windNoiseBuffer;
-            const noiseFilt = this.ctx.createBiquadFilter();
-            noiseFilt.type = 'bandpass';
-            noiseFilt.frequency.setValueAtTime(400, t);
-            noiseFilt.frequency.exponentialRampToValueAtTime(1800, t + 0.2);
-            noiseFilt.Q.setValueAtTime(0.6, t);
-            const noiseGain = this.ctx.createGain();
-            noiseGain.gain.setValueAtTime(0.5, t);
-            noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
-            noiseSrc.connect(noiseFilt);
-            noiseFilt.connect(noiseGain);
-            noiseGain.connect(this.ctx.destination);
-            noiseSrc.start(t);
-            noiseSrc.stop(t + 0.5);
-        }
+      // Layer 2: Noise burst (use wind buffer if available)
+      if (this.windNoiseBuffer) {
+        const noiseSrc = this.ctx.createBufferSource();
+        noiseSrc.buffer = this.windNoiseBuffer;
+        const noiseFilt = this.ctx.createBiquadFilter();
+        noiseFilt.type = 'bandpass';
+        noiseFilt.frequency.setValueAtTime(400, t);
+        noiseFilt.frequency.exponentialRampToValueAtTime(1800, t + 0.2);
+        noiseFilt.Q.setValueAtTime(0.6, t);
+        const noiseGain = this.ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.5, t);
+        noiseGain.gain.exponentialRampToValueAtTime(0.01, t + 0.5);
+        noiseSrc.connect(noiseFilt);
+        noiseFilt.connect(noiseGain);
+        noiseGain.connect(this.ctx.destination);
+        noiseSrc.start(t);
+        noiseSrc.stop(t + 0.5);
+      }
 
     } else if (type === 'thrust') {
-        // Throttling thrust sound to prevent audio glitching
-        const now = Date.now();
-        if (now - this.thrustCooldown < 80) return;
-        this.thrustCooldown = now;
+      // Throttling thrust sound to prevent audio glitching
+      const now = Date.now();
+      if (now - this.thrustCooldown < 80) return;
+      this.thrustCooldown = now;
 
-        // Low sputtering engine sound
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(60, t);
-        osc.frequency.linearRampToValueAtTime(40, t + 0.08);
-        
-        gain.gain.setValueAtTime(0.05, t);
-        gain.gain.linearRampToValueAtTime(0, t + 0.08);
-        
-        osc.start(t);
-        osc.stop(t + 0.08);
+      // Low sputtering engine sound
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(60, t);
+      osc.frequency.linearRampToValueAtTime(40, t + 0.08);
+
+      gain.gain.setValueAtTime(0.05, t);
+      gain.gain.linearRampToValueAtTime(0, t + 0.08);
+
+      osc.start(t);
+      osc.stop(t + 0.08);
 
     } else if (type === 'coin') {
-        // High pitch "Ding"
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(1200, t);
-        osc.frequency.exponentialRampToValueAtTime(2000, t + 0.1);
-        
-        gain.gain.setValueAtTime(0.15, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
-        
-        osc.start(t);
-        osc.stop(t + 0.4);
+      // High pitch "Ding"
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1200, t);
+      osc.frequency.exponentialRampToValueAtTime(2000, t + 0.1);
+
+      gain.gain.setValueAtTime(0.15, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.4);
+
+      osc.start(t);
+      osc.stop(t + 0.4);
 
     } else if (type === 'damage') {
-        // Dull mechanical thud
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(150, t);
-        osc.frequency.exponentialRampToValueAtTime(40, t + 0.15);
-        
-        gain.gain.setValueAtTime(0.2, t);
-        gain.gain.linearRampToValueAtTime(0, t + 0.15);
-        
-        osc.start(t);
-        osc.stop(t + 0.15);
+      // Dull mechanical thud
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, t);
+      osc.frequency.exponentialRampToValueAtTime(40, t + 0.15);
+
+      gain.gain.setValueAtTime(0.2, t);
+      gain.gain.linearRampToValueAtTime(0, t + 0.15);
+
+      osc.start(t);
+      osc.stop(t + 0.15);
 
     } else if (type === 'crash') {
-        // Explosive noise approximation
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(80, t);
-        osc.frequency.exponentialRampToValueAtTime(10, t + 0.6);
-        
-        // Tremolo for roughness
-        gain.gain.setValueAtTime(0.4, t);
-        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
-        
-        osc.start(t);
-        osc.stop(t + 0.6);
+      // Explosive noise approximation
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(80, t);
+      osc.frequency.exponentialRampToValueAtTime(10, t + 0.6);
+
+      // Tremolo for roughness
+      gain.gain.setValueAtTime(0.4, t);
+      gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+
+      osc.start(t);
+      osc.stop(t + 0.6);
 
     } else if (type === 'shop') {
-        // UI blip
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(440, t);
-        osc.frequency.setValueAtTime(660, t + 0.05);
-        
-        gain.gain.setValueAtTime(0.1, t);
-        gain.gain.linearRampToValueAtTime(0, t + 0.1);
-        
-        osc.start(t);
-        osc.stop(t + 0.1);
+      // UI blip
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, t);
+      osc.frequency.setValueAtTime(660, t + 0.05);
+
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.linearRampToValueAtTime(0, t + 0.1);
+
+      osc.start(t);
+      osc.stop(t + 0.1);
 
     } else if (type === 'win') {
-        // Simple major arpeggio
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(523.25, t); // C5
-        osc.frequency.setValueAtTime(659.25, t + 0.1); // E5
-        osc.frequency.setValueAtTime(783.99, t + 0.2); // G5
-        osc.frequency.setValueAtTime(1046.50, t + 0.3); // C6
-        
-        gain.gain.setValueAtTime(0.1, t);
-        gain.gain.setValueAtTime(0.1, t + 0.3);
-        gain.gain.linearRampToValueAtTime(0, t + 0.6);
-        
-        osc.start(t);
-        osc.stop(t + 0.6);
+      // Simple major arpeggio
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523.25, t); // C5
+      osc.frequency.setValueAtTime(659.25, t + 0.1); // E5
+      osc.frequency.setValueAtTime(783.99, t + 0.2); // G5
+      osc.frequency.setValueAtTime(1046.50, t + 0.3); // C6
+
+      gain.gain.setValueAtTime(0.1, t);
+      gain.gain.setValueAtTime(0.1, t + 0.3);
+      gain.gain.linearRampToValueAtTime(0, t + 0.6);
+
+      osc.start(t);
+      osc.stop(t + 0.6);
+
     }
   }
 };
