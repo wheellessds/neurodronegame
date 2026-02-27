@@ -12,6 +12,14 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// 轉發相容性修正：移除可能的子路徑前綴
+app.use((req, res, next) => {
+    if (req.url.startsWith('/drone/')) {
+        req.url = req.url.replace('/drone/', '/');
+    }
+    next();
+});
+
 // 設置 TypeScript 模組的正確 MIME type
 app.use((req, res, next) => {
     if (req.path.endsWith('.tsx') || req.path.endsWith('.ts')) {
@@ -20,7 +28,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// 靜態文件託管（根目錄，不是 dist）
+// 靜態文件託管（優先使用生產環境編譯出的 dist 目錄）
+const distPath = path.resolve(__dirname, 'dist');
+if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+}
 app.use(express.static(__dirname));
 
 // --- 房間管理變數 ---
@@ -265,7 +277,13 @@ app.post('/api/leaderboard', (req, res) => {
 });
 
 app.use((req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+    // 優先指向 dist/index.html
+    const prodFile = path.resolve(__dirname, 'dist', 'index.html');
+    if (fs.existsSync(prodFile)) {
+        res.sendFile(prodFile);
+    } else {
+        res.sendFile(path.join(__dirname, 'index.html'));
+    }
 });
 
 app.listen(PORT, '0.0.0.0', () => {

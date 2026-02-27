@@ -45,7 +45,9 @@ const leaderboardStoragePlugin = (): Plugin => ({
     };
 
     server.middlewares.use(async (req, res, next) => {
-      const url = req.url || '';
+      const rawUrl = req.url || '';
+      // 移除查詢參數並忽略可能的 /drone/ 前綴
+      const url = rawUrl.split('?')[0].replace(/^\/drone\//, '/');
 
       // --- AUTH API ---
       if (url === '/api/register' && req.method === 'POST') {
