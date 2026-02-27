@@ -195,7 +195,7 @@ const App: React.FC = () => {
             localStorage.removeItem('neuro_drone_token');
             // If token invalid, proceed as guest to check name
             if (playerName) {
-              fetch('/api/check-name', {
+              fetch('api/check-name', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username: playerName })
