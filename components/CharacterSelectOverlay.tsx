@@ -2,6 +2,12 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Persona } from '../types';
 import { DroneView } from './DroneView';
 
+// Import Personas
+import neuroPortrait from '../assets/conceptart/neuro.png';
+import evilPortrait from '../assets/conceptart/evil.png';
+import vedalPortrait from '../assets/conceptart/Vedal.webp';
+import airisPortrait from '../assets/conceptart/Airis.webp';
+
 interface Character {
     id: Persona;
     name: string;
@@ -17,7 +23,7 @@ const CHARACTERS: Character[] = [
         name: "Neuro-sama",
         fullName: "結城 希依 (Neuro-sama)",
         description: "以標準模式開始任務。\n此角色具有隨機的系統延遲模擬，\n模擬 AI 的反應遲緩。適合一般難度。",
-        image: "/assets/conceptart/neuro.png",
+        image: neuroPortrait,
         color: "#f472b6" // pink-400 (matching debris)
     },
     {
@@ -25,7 +31,7 @@ const CHARACTERS: Character[] = [
         name: "Evil Neuro",
         fullName: "結城 希依 (Evil Neuro)",
         description: "以高速模式開始任務。\n機體數值極大化，適合尋求極限速度感的玩家。",
-        image: "/assets/conceptart/evil.png",
+        image: evilPortrait,
         color: "#ef4444" // red-500
     },
     {
@@ -33,7 +39,7 @@ const CHARACTERS: Character[] = [
         name: "Vedal",
         fullName: "Vedal (Creator)",
         description: "以穩定高效模式開始任務。\n身為 Neuro 的創造者，具有極高的硬體耐性與能源效率，\n能承受劇烈撞擊且更省油，適合新手或長距離任務。",
-        image: "/assets/conceptart/Vedal.webp",
+        image: vedalPortrait,
         color: "#16a34a" // green-600 (more distinct)
     },
     {
@@ -41,7 +47,7 @@ const CHARACTERS: Character[] = [
         name: "Airis",
         fullName: "Airis",
         description: "以最平庸的數值開始任務。\n[被動] 節奏回饋 (Rhythm Feedback)\n受傷時會生成回復圓圈，收集後可修復機體與貨物。\n適合而在險境中尋找節奏的玩家。",
-        image: "/assets/conceptart/Airis.webp",
+        image: airisPortrait,
         color: "#94a3b8" // slate-400
     }
 ];
