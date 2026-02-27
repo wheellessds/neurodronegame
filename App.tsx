@@ -70,6 +70,7 @@ const App: React.FC = () => {
   const [showUserMgmt, setShowUserMgmt] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [showCharacterSelect, setShowCharacterSelect] = useState(false);
+  const [isSavingScore, setIsSavingScore] = useState(false); // [FIX] Prevent multi-clicks on leaderboard save
 
   // Upgrades & Inventory
   const [upgrades, setUpgrades] = useState<UpgradeStats>({
@@ -978,6 +979,8 @@ const App: React.FC = () => {
   };
 
   const saveToLeaderboard = async (name: string, distance: number, time: number, trajectory?: { x: number, y: number }[], cargoTrajectory?: { x: number, y: number }[]) => {
+    if (isSavingScore) return; // [LOCK]
+    setIsSavingScore(true);
     console.log(`[Leaderboard] Saving score for ${name}. Trajectory length: ${trajectory?.length || 0}`);
     const entry: LeaderboardEntry = {
       name, distance, time, date: new Date().toLocaleString('zh-TW', { hour12: false }).replace(/\//g, '-'),
@@ -1005,6 +1008,8 @@ const App: React.FC = () => {
       setPostScoreAction(null);
     } catch (e) {
       console.error("Failed to save score", e);
+    } finally {
+      setIsSavingScore(false);
     }
   };
 
@@ -1925,13 +1930,14 @@ const App: React.FC = () => {
                 <div className="flex gap-4">
                   <button
                     onClick={() => saveToLeaderboard(pendingScore.name || playerName || 'Anonymous', pendingScore.distance, pendingScore.time, pendingScore.trajectory, pendingScore.cargoTrajectory)}
-                    className="flex-[2] bg-cyan-600 hover:bg-cyan-500 text-white font-black italic text-xl py-4 skew-x-[-12deg] shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all active:scale-95 group/btn relative overflow-hidden"
+                    disabled={isSavingScore}
+                    className={`flex-[2] bg-cyan-600 hover:bg-cyan-500 text-white font-black italic text-xl py-4 skew-x-[-12deg] shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all active:scale-95 group/btn relative overflow-hidden ${isSavingScore ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
                     <div className="skew-x-[12deg] relative z-10 flex items-center justify-center gap-2">
-                      <span>SAVE RECORD</span>
+                      <span>{isSavingScore ? 'SAVING...' : 'SAVE RECORD'}</span>
                       <span className="text-xs font-mono bg-black/30 px-2 py-0.5 rounded">⏎</span>
                     </div>
-                    <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-500 ease-in-out skew-x-[12deg]" />
+                    {!isSavingScore && <div className="absolute inset-0 bg-white/20 translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-500 ease-in-out skew-x-[12deg]" />}
                   </button>
 
                   <button
