@@ -11,7 +11,14 @@
 
 ## 🛠️ 最近更新 (Latest Updates)
 
-- **Alpha 2.1 (最新)**:
+- **Alpha 2.2 (最新)**:
+  - **子路徑部署支援**: 所有前端 API 請求已由絕對路徑 (`/api/...`) 修改為相對路徑 (`api/...`)，確保在 Nginx 子路徑（如 `/drone/`）下能正確指向正確的後端服務。
+  - **支援多遊戲平台架構 (Multi-Game Portal Support)**：
+    - 專案現在可以在 `https://domain.com/drone/` 子路徑下順利運行。
+    - 修改了 `vite.config.ts` 的 `base` 路徑為 `/drone/`。
+    - 引進了遊戲大廳 (Game Portal) 系統，實現單一伺服器託管多個遊戲。
+- **Alpha 2.1**:
+
   - **移除「Evil's Trident (三叉戟)」機制**：
     - 根據要求全面移除了 Evil Neuro 的 Harpoon 調用與渲染邏輯。
     - 清理了相關的類型定義 (`types.ts`) 與音效引用。

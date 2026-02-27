@@ -93,7 +93,7 @@ const App: React.FC = () => {
   ) => {
     if (!user) return;
     try {
-      await fetch('/api/save', {
+      await fetch('api/save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,7 +149,7 @@ const App: React.FC = () => {
 
     if (!user && name.length > 0) {
       try {
-        const res = await fetch('/api/check-name', {
+        const res = await fetch('api/check-name', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: name })
@@ -173,7 +173,7 @@ const App: React.FC = () => {
 
     if (savedToken) {
       // Try to verify token
-      fetch('/api/verify-token', {
+      fetch('api/verify-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: savedToken })
@@ -232,7 +232,7 @@ const App: React.FC = () => {
           }
         });
     } else if (!user && playerName) {
-      fetch('/api/check-name', {
+      fetch('api/check-name', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: playerName })
@@ -458,7 +458,7 @@ const App: React.FC = () => {
       }
     }
 
-    fetch('/api/leaderboard').then(res => res.json()).then(data => {
+    fetch('api/leaderboard').then(res => res.json()).then(data => {
       setLeaderboard(data);
       if (data.length > 0) setHighScore(prev => Math.max(prev, data[0].distance));
     }).catch(e => console.error("Failed to load leaderboard", e));
@@ -793,7 +793,7 @@ const App: React.FC = () => {
     setVedalMessage("已登出系統。");
     // Re-trigger name check as guest (bypass handleUpdateName since user state hasn't updated yet)
     if (playerName && playerName.length > 0) {
-      fetch('/api/check-name', {
+      fetch('api/check-name', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: playerName })
@@ -956,7 +956,7 @@ const App: React.FC = () => {
 
   const handleRedeemCode = (code: string) => {
     if (!user) return;
-    fetch('/api/redeem-code', {
+    fetch('api/redeem-code', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token: user.token, code })
@@ -985,12 +985,12 @@ const App: React.FC = () => {
     };
 
     try {
-      await fetch('/api/leaderboard', {
+      await fetch('api/leaderboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(entry)
       });
-      const res = await fetch('/api/leaderboard');
+      const res = await fetch('api/leaderboard');
       const data = await res.json();
       setLeaderboard(data);
       setHighScore(prev => Math.max(prev, distance));

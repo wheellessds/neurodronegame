@@ -18,7 +18,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, onGuest }) => {
         setError(null);
         setLoading(true);
 
-        const endpoint = isRegistering ? '/api/register' : '/api/login';
+        const endpoint = isRegistering ? 'api/register' : 'api/login';
 
         try {
             const res = await fetch(endpoint, {

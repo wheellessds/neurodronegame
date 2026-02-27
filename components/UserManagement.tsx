@@ -21,7 +21,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ token, onClose, 
     const fetchUsers = async () => {
         setLoading(true);
         try {
-            const res = await fetch('/api/admin/list-users', {
+            const res = await fetch('api/admin/list-users', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token })
@@ -50,7 +50,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ token, onClose, 
 
         setIsDeleting(username);
         try {
-            const res = await fetch('/api/admin/delete-user', {
+            const res = await fetch('api/admin/delete-user', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token, username })

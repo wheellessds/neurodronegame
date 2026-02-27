@@ -19,7 +19,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({ entries, onClose, onEx
         if (!confirm("確定要刪除此條分數紀錄嗎？")) return;
         setIsDeleting(index);
         try {
-            const res = await fetch('/api/admin/delete-entry', {
+            const res = await fetch('api/admin/delete-entry', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ token, entryIndex: index })

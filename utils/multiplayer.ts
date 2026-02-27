@@ -58,7 +58,7 @@ export class MultiplayerManager {
 
     static async getRooms(): Promise<any[]> {
         try {
-            const res = await fetch('/api/rooms');
+            const res = await fetch('api/rooms');
             if (res.ok) return await res.json();
         } catch (e) {
             console.error("Failed to fetch rooms", e);
@@ -132,7 +132,7 @@ export class MultiplayerManager {
                 players: this.connections.size + 1,
                 maxPlayers: 8
             };
-            fetch('/api/rooms', {
+            fetch('api/rooms', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
