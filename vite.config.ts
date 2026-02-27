@@ -358,6 +358,7 @@ const leaderboardStoragePlugin = (): Plugin => ({
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', '');
   return {
+    base: '/drone/',
     server: { port: 3000, host: '0.0.0.0', allowedHosts: true },
     plugins: [react(), leaderboardStoragePlugin()],
     define: {
